@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="scan_qr"
+        android:enabled="true"
+        android:icon="@drawable/ic_qr_scan_shortcut"
+        android:shortcutShortLabel="@string/shortcut_qr_short"
+        android:shortcutLongLabel="@string/shortcut_qr_long">
+        <intent
+            android:action="com.ash.axis.action.SCAN_QR"
+            android:targetPackage="com.ash.axis"
+            android:targetClass="com.ash.axis.ui.MainActivity" />
+    </shortcut>
+</shortcuts>

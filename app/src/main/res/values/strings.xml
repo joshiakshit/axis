@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Axis</string>
+    <string name="shortcut_qr_short">Scan QR</string>
+    <string name="shortcut_qr_long">Scan attendance QR</string>
+</resources>

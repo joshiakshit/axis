@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">icloudems.com</domain>
+        <pin-set expiration="2027-12-31">
+            <pin digest="SHA-256">ZTk2s05pt6gTx+o1oRTKbwlZRRPdPNbvQZZEYicOFnE=</pin>
+            <pin digest="SHA-256">wpLIMDw8n+hAzX0ZBp8Yd06VF8xm6hP3xatC9hdISBg=</pin>
+            <pin digest="SHA-256">DxH4tt40L+eduF6szpY6TONlxhZhBd+pJ9wbHlQ2fuw=</pin>
+            <pin digest="SHA-256">G9LNNAql897egYsabashkzUCTEJkWBzgoEtk8X/678c=</pin>
+            <pin digest="SHA-256">++MBgDH5WGvL9Bcn5Be30cRcL0f5O+NyoXuWtQdX1aI=</pin>
+            <pin digest="SHA-256">KwccWaCgrnaw6tsrrSO61FgLacNgG2MMLq8GE6+oP5I=</pin>
+        </pin-set>
+    </domain-config>
+</network-security-config>
