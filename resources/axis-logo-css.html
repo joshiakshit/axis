@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Axis logo — CSS animation</title>
+<style>
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: #0A0A0A;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .axis-mark {
+    width: 220px;
+    height: auto;
+  }
+
+  .axis-mark path {
+    fill: none;
+    stroke: #FFFFFF;
+    stroke-width: 20;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-dasharray: 394;
+    stroke-dashoffset: 394;
+    animation: axis-draw 4s ease-in-out infinite;
+  }
+
+  @keyframes axis-draw {
+    0% {
+      stroke-dashoffset: 394;
+    }
+    8% {
+      stroke-dashoffset: 394;
+    }
+    55% {
+      stroke-dashoffset: 0;
+    }
+    100% {
+      stroke-dashoffset: 0;
+    }
+  }
+</style>
+</head>
+<body>
+
+  <svg class="axis-mark" viewBox="0 0 680 420" xmlns="http://www.w3.org/2000/svg">
+    <path d="M 245 320 L 345 150 L 445 320"/>
+  </svg>
+
+</body>
+</html>

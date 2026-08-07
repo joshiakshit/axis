@@ -1,17 +1,17 @@
 package com.ash.axis.ui.settings
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -27,30 +27,32 @@ import com.ash.core.ui.theme.AppShapes
 @Composable
 internal fun ExportSettings(
     isExporting: Boolean,
-    onExportAttendance: () -> Unit,
-    onExportTimetable: () -> Unit,
+    onShareAttendance: () -> Unit,
+    onDownloadAttendance: () -> Unit,
+    onShareTimetable: () -> Unit,
+    onDownloadTimetable: () -> Unit,
 ) {
     SettingsCard {
         Column {
             AnimatedVisibility(visible = isExporting) {
                 Column {
-                    LinearProgressIndicator(
-                        modifier = Modifier.fillMaxWidth().clip(AppShapes.full),
-                    )
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().clip(AppShapes.full))
                     Spacer(Modifier.height(8.dp))
                 }
             }
             ExportRow(
                 label = "Export attendance",
-                subtitle = "Per-subject CSV spreadsheet",
+                subtitle = "Share CSV · download PDF",
                 enabled = !isExporting,
-                onClick = onExportAttendance,
+                onShare = onShareAttendance,
+                onDownload = onDownloadAttendance,
             )
             ExportRow(
                 label = "Export timetable",
-                subtitle = "The week you're viewing, as a calendar (.ics)",
+                subtitle = "The week you're viewing · share ICS · download PDF",
                 enabled = !isExporting,
-                onClick = onExportTimetable,
+                onShare = onShareTimetable,
+                onDownload = onDownloadTimetable,
             )
         }
     }
@@ -61,15 +63,11 @@ private fun ExportRow(
     label: String,
     subtitle: String,
     enabled: Boolean,
-    onClick: () -> Unit,
+    onShare: () -> Unit,
+    onDownload: () -> Unit,
 ) {
     Row(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .clip(AppShapes.small)
-                .clickable(enabled = enabled) { onClick() }
-                .padding(vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
@@ -86,11 +84,21 @@ private fun ExportRow(
             )
             Text(subtitle, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Icon(
-            Icons.Filled.Share,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 0.6f else 0.25f),
-            modifier = Modifier.size(18.dp),
-        )
+        IconButton(onClick = onShare, enabled = enabled) {
+            Icon(
+                Icons.Filled.Share,
+                contentDescription = "Share",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        IconButton(onClick = onDownload, enabled = enabled) {
+            Icon(
+                Icons.Filled.Download,
+                contentDescription = "Download PDF",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
+        }
     }
 }

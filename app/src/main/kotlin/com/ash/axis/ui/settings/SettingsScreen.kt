@@ -77,8 +77,10 @@ fun SettingsScreen(
         item {
             ExportSettings(
                 isExporting = state.isExporting,
-                onExportAttendance = viewModel::exportAttendance,
-                onExportTimetable = viewModel::exportTimetable,
+                onShareAttendance = viewModel::exportAttendance,
+                onDownloadAttendance = viewModel::downloadAttendance,
+                onShareTimetable = viewModel::exportTimetable,
+                onDownloadTimetable = viewModel::downloadTimetable,
             )
         }
 

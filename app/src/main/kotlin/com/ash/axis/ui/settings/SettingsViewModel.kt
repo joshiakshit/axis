@@ -19,12 +19,14 @@ import com.ash.core.ui.theme.ColorProfiles
 import com.ash.core.ui.theme.ThemeMode
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 data class SettingsUiState(
@@ -147,8 +149,35 @@ class SettingsViewModel
 
         fun exportTimetable() = runExport { dataExporter.exportTimetableIcs() }
 
+        fun downloadAttendance() = runDownload { dataExporter.exportAttendancePdf() }
+
+        fun downloadTimetable() = runDownload { dataExporter.exportTimetablePdf() }
+
         fun consumeExportMessage() {
             if (_state.value.exportMessage != null) _state.update { it.copy(exportMessage = null) }
+        }
+
+        // Generate a PDF and drop it straight into the phone's Downloads (falling back to sharing on very
+        // old Android versions that can't write there without a permission prompt).
+        @Suppress("TooGenericExceptionCaught")
+        private fun runDownload(block: suspend () -> ExportFile) {
+            if (_state.value.isExporting) return
+            viewModelScope.launch {
+                _state.update { it.copy(isExporting = true) }
+                try {
+                    val export = withContext(Dispatchers.IO) { block() }
+                    val saved = withContext(Dispatchers.IO) { dataExporter.saveToDownloads(export) }
+                    if (saved) {
+                        _state.update { it.copy(exportMessage = "Saved to Downloads: ${export.file.name}") }
+                    } else {
+                        share(export)
+                    }
+                } catch (e: Exception) {
+                    _state.update { it.copy(exportMessage = ErrorText.forData(e)) }
+                } finally {
+                    _state.update { it.copy(isExporting = false) }
+                }
+            }
         }
 
         @Suppress("TooGenericExceptionCaught")

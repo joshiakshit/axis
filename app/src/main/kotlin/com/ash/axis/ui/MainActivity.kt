@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.fragment.app.FragmentActivity
@@ -68,9 +69,13 @@ class MainActivity : FragmentActivity() {
                 }
         }
 
+        val launchedForScan = intent?.action == ACTION_SCAN_QR
+
         setContent {
             val startupData = startup ?: return@setContent
             val qrScanRequest by qrScanRequests.collectAsStateWithLifecycle()
+            // Play the branded splash once per cold start, but skip it when the user tapped the QR shortcut.
+            var splashDone by rememberSaveable { mutableStateOf(launchedForScan) }
             val themeModeStr by preferencesStore
                 .getString("theme_mode", ThemeMode.DARK.name)
                 .collectAsStateWithLifecycle(initialValue = startupData.themeMode)
@@ -89,11 +94,15 @@ class MainActivity : FragmentActivity() {
                 )
 
             AppTheme(themeState = themeState) {
-                SessionGate(
-                    preferencesStore = preferencesStore,
-                    qrScanRequest = qrScanRequest,
-                    startRoute = startupData.startRoute,
-                )
+                if (!splashDone) {
+                    AxisSplash(onFinished = { splashDone = true })
+                } else {
+                    SessionGate(
+                        preferencesStore = preferencesStore,
+                        qrScanRequest = qrScanRequest,
+                        startRoute = startupData.startRoute,
+                    )
+                }
             }
         }
     }

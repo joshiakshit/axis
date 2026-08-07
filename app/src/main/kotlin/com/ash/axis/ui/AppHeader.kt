@@ -23,9 +23,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ash.axis.R
 
 @Composable
 internal fun AppHeader(
@@ -42,11 +44,11 @@ internal fun AppHeader(
                 .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            "Axis",
-            fontSize = 17.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface,
+        Icon(
+            painter = painterResource(R.drawable.ic_axis_logo),
+            contentDescription = "Axis",
+            modifier = Modifier.size(width = 24.dp, height = 18.dp),
+            tint = MaterialTheme.colorScheme.onSurface,
         )
         Spacer(Modifier.weight(1f))
         AccountAvatar(
