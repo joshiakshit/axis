@@ -44,7 +44,6 @@ import com.ash.core.ui.theme.cardColor
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.ImmutableMap
 import kotlinx.collections.immutable.ImmutableSet
-import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -56,7 +55,7 @@ internal fun SimulatorGrid(
     selectedDates: ImmutableSet<LocalDate>,
     holidays: ImmutableSet<LocalDate>,
     anchorDate: LocalDate?,
-    timetable: ImmutableMap<String, ImmutableList<TimetableSlot>>,
+    dateTimetable: ImmutableMap<LocalDate, ImmutableList<TimetableSlot>>,
     onPreview: (LocalDate) -> Unit,
     onMarkAbsent: (LocalDate) -> Unit,
     onShiftMonth: (Int) -> Unit,
@@ -77,16 +76,6 @@ internal fun SimulatorGrid(
 
     val dayNames = listOf("M", "T", "W", "T", "F", "S", "S")
     val dateLabelFormatter = DateTimeFormatter.ofPattern("EEEE, dd MMM")
-    val dayKeyMap =
-        mapOf(
-            DayOfWeek.MONDAY to "Mon",
-            DayOfWeek.TUESDAY to "Tue",
-            DayOfWeek.WEDNESDAY to "Wed",
-            DayOfWeek.THURSDAY to "Thu",
-            DayOfWeek.FRIDAY to "Fri",
-            DayOfWeek.SATURDAY to "Sat",
-            DayOfWeek.SUNDAY to "Sun",
-        )
 
     Surface(
         shape = AppShapes.medium,
@@ -139,8 +128,7 @@ internal fun SimulatorGrid(
                                 selectedDates = selectedDates,
                                 holidays = holidays,
                                 anchorDate = anchorDate,
-                                timetable = timetable,
-                                dayKeyMap = dayKeyMap,
+                                dateTimetable = dateTimetable,
                                 dateLabelFormatter = dateLabelFormatter,
                                 onPreview = onPreview,
                                 onMarkAbsent = onMarkAbsent,
@@ -163,8 +151,7 @@ private fun SimulatorDayCell(
     selectedDates: ImmutableSet<LocalDate>,
     holidays: ImmutableSet<LocalDate>,
     anchorDate: LocalDate?,
-    timetable: ImmutableMap<String, ImmutableList<TimetableSlot>>,
-    dayKeyMap: Map<DayOfWeek, String>,
+    dateTimetable: ImmutableMap<LocalDate, ImmutableList<TimetableSlot>>,
     dateLabelFormatter: DateTimeFormatter,
     onPreview: (LocalDate) -> Unit,
     onMarkAbsent: (LocalDate) -> Unit,
@@ -176,8 +163,8 @@ private fun SimulatorDayCell(
     val isSelected = date in selectedDates
     val isHoliday = date in holidays
     val isAnchor = !isSelected && !isHoliday && date == anchorDate
-    val dayKey = dayKeyMap[date.dayOfWeek] ?: ""
-    val hasClasses = (timetable[dayKey] ?: emptyList()).isNotEmpty()
+    // A day is selectable only if the real (future) timetable has at least one class that day.
+    val hasClasses = dateTimetable[date]?.isNotEmpty() == true
 
     val bgColor =
         when {

@@ -1,21 +1,25 @@
 package com.ash.axis.ui.qr
 
+import androidx.activity.compose.BackHandler
 import androidx.camera.core.ZoomState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -25,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -35,7 +40,7 @@ import java.util.Locale
 
 @Suppress("LongMethod")
 @Composable
-internal fun QrScannerDialog(
+internal fun QrScanScreen(
     onQrScanned: (String) -> Unit,
     onCancel: () -> Unit,
     onError: (String) -> Unit,
@@ -47,10 +52,7 @@ internal fun QrScannerDialog(
 
     DisposableEffect(cameraRef) {
         val camera = cameraRef
-        val observer =
-            androidx.lifecycle.Observer<ZoomState> { zs ->
-                hardwareMaxZoom = zs.maxZoomRatio
-            }
+        val observer = androidx.lifecycle.Observer<ZoomState> { zs -> hardwareMaxZoom = zs.maxZoomRatio }
         camera?.cameraInfo?.zoomState?.observeForever(observer)
         onDispose { camera?.cameraInfo?.zoomState?.removeObserver(observer) }
     }
@@ -59,29 +61,58 @@ internal fun QrScannerDialog(
     val opticalZoom = minOf(zoomRatio, hardwareMaxZoom)
     val digitalZoom = (zoomRatio / opticalZoom).coerceAtLeast(1f)
 
-    AlertDialog(
-        onDismissRequest = onCancel,
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onCancel) {
-                Text("Cancel")
-            }
-        },
-        title = { Text("Scan QR") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                QrCameraPreview(
-                    lifecycleOwner = lifecycleOwner,
-                    digitalZoom = digitalZoom,
-                    onQrScanned = onQrScanned,
-                    onError = onError,
-                    onCameraBound = { camera -> cameraRef = camera },
-                    onPinchZoom = { scaleFactor ->
-                        val newZoom = (zoomRatio * scaleFactor).coerceIn(1f, sliderMax)
-                        zoomRatio = newZoom
-                        cameraRef?.cameraControl?.setZoomRatio(minOf(newZoom, hardwareMaxZoom))
-                    },
+    BackHandler(onBack = onCancel)
+
+    Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            QrCameraPreview(
+                lifecycleOwner = lifecycleOwner,
+                digitalZoom = digitalZoom,
+                onQrScanned = onQrScanned,
+                onError = onError,
+                onCameraBound = { camera -> cameraRef = camera },
+                onPinchZoom = { scaleFactor ->
+                    val newZoom = (zoomRatio * scaleFactor).coerceIn(1f, sliderMax)
+                    zoomRatio = newZoom
+                    cameraRef?.cameraControl?.setZoomRatio(minOf(newZoom, hardwareMaxZoom))
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+
+            // Scan-frame reticle
+            Box(
+                modifier =
+                    Modifier
+                        .align(Alignment.Center)
+                        .size(255.dp)
+                        .border(2.5.dp, Color.White.copy(alpha = 0.9f), RoundedCornerShape(24.dp)),
+            )
+
+            ScrimTop()
+            ScrimBottom()
+
+            CameraTopBar(
+                title = "Mark Attendance",
+                step = "Step 2 of 2 · Scan QR",
+                onClose = onCancel,
+            )
+
+            Column(
+                modifier =
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    "Point at the classroom QR code",
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 13.sp,
                 )
+                Spacer24()
                 ZoomSlider(
                     zoom = zoomRatio,
                     range = 1f..sliderMax,
@@ -91,8 +122,13 @@ internal fun QrScannerDialog(
                     },
                 )
             }
-        },
-    )
+        }
+    }
+}
+
+@Composable
+private fun Spacer24() {
+    Box(modifier = Modifier.height(14.dp))
 }
 
 @Suppress("LongMethod")
@@ -104,9 +140,8 @@ private fun ZoomSlider(
 ) {
     val span = range.endInclusive - range.start
     val fraction = ((zoom - range.start) / span).coerceIn(0f, 1f)
-    val trackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.18f)
-    val activeColor = MaterialTheme.colorScheme.primary
-    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val trackColor = Color.White.copy(alpha = 0.25f)
+    val activeColor = Color.White
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -117,7 +152,7 @@ private fun ZoomSlider(
             fontSize = 10.sp,
             fontWeight = FontWeight.SemiBold,
             fontFamily = FontFamily.Monospace,
-            color = labelColor,
+            color = Color.White.copy(alpha = 0.85f),
         )
         Box(
             modifier =
@@ -156,9 +191,7 @@ private fun ZoomSlider(
                         .background(activeColor),
             )
             Box(
-                modifier =
-                    Modifier
-                        .fillMaxWidth(fraction.coerceAtLeast(0.01f)),
+                modifier = Modifier.fillMaxWidth(fraction.coerceAtLeast(0.01f)),
                 contentAlignment = Alignment.CenterEnd,
             ) {
                 Box(

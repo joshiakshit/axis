@@ -16,7 +16,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -24,6 +23,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.ash.axis.ui.academics.AcademicsScreen
+import com.ash.axis.ui.account.AccountSwitcherSheet
 import com.ash.axis.ui.dashboard.DashboardScreen
 import com.ash.axis.ui.grades.GradesScreen
 import com.ash.axis.ui.qr.QrScanFlow
@@ -34,30 +34,34 @@ import com.ash.core.storage.PreferencesStore
 import com.ash.core.ui.navigation.AppScaffold
 import com.ash.core.ui.navigation.BottomNavItem
 import com.ash.core.ui.navigation.CoreNavHost
-import com.ash.core.ui.theme.ThemeMode
-import kotlinx.coroutines.launch
+
+// Main bottom-nav routes whose last selection is remembered as the app's reopen destination.
+private val tabRoutes = setOf("dashboard", "academics", "planner", "grades")
 
 @Suppress("LongMethod", "CyclomaticComplexMethod")
 @Composable
 internal fun MainApp(
     preferencesStore: PreferencesStore,
     qrScanRequest: Int,
-    onLogout: () -> Unit,
+    accounts: AccountUiState,
+    startRoute: String,
 ) {
-    val scope = rememberCoroutineScope()
     val navController = rememberNavController()
     val qrViewModel: QrScanViewModel = hiltViewModel()
     val qrState by qrViewModel.state.collectAsStateWithLifecycle()
     var showQrFlow by remember { mutableStateOf(false) }
+    var showAccountSwitcher by remember { mutableStateOf(false) }
+    val account = accounts.account
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-    val themeModeStr by preferencesStore
-        .getString("theme_mode", ThemeMode.DARK.name)
-        .collectAsStateWithLifecycle(initialValue = ThemeMode.DARK.name)
-    val themeMode = ThemeMode.entries.find { it.name == themeModeStr } ?: ThemeMode.DARK
-    val compactNavBar by preferencesStore
-        .getBoolean("compact_nav_bar")
-        .collectAsStateWithLifecycle(initialValue = false)
+
+    // Remember the last main tab so the app reopens where the user left off.
+    LaunchedEffect(currentRoute) {
+        val route = currentRoute
+        if (route != null && route in tabRoutes) {
+            preferencesStore.putString("last_route", route)
+        }
+    }
 
     val allNavItems =
         listOf(
@@ -66,8 +70,6 @@ internal fun MainApp(
             BottomNavItem("Timetable", Icons.Default.EditCalendar, "planner"),
             BottomNavItem("Grades", Icons.Default.School, "grades"),
         )
-    val startRoute = "dashboard"
-
     LaunchedEffect(qrScanRequest) {
         if (qrScanRequest > 0) {
             showQrFlow = true
@@ -81,10 +83,6 @@ internal fun MainApp(
             navController.navigate("settings") { launchSingleTop = true }
         }
     }
-    val onThemeToggle: () -> Unit = {
-        scope.launch { preferencesStore.putString("theme_mode", themeMode.next().name) }
-    }
-
     Box(modifier = Modifier.fillMaxSize()) {
         AppScaffold(
             items = allNavItems,
@@ -100,16 +98,16 @@ internal fun MainApp(
                 }
             },
             showBottomBar = currentRoute != "settings",
-            compactNavBar = compactNavBar,
             fabIcon = Icons.Default.QrCodeScanner,
             onFabClick = {
                 showQrFlow = true
             },
             topBar = {
                 AppHeader(
-                    themeMode = themeMode,
-                    onThemeToggle = onThemeToggle,
                     onSettingsClick = navigateToSettings,
+                    accountName = account.activeAccount?.name.orEmpty(),
+                    hasMultipleAccounts = account.accounts.size > 1,
+                    onAccountClick = { showAccountSwitcher = true },
                 )
             },
         ) { innerPadding ->
@@ -135,7 +133,7 @@ internal fun MainApp(
                             "settings" to {
                                 SettingsScreen(
                                     modifier = Modifier.padding(innerPadding),
-                                    onLogout = onLogout,
+                                    onLogout = accounts.onActiveLoggedOut,
                                 )
                             },
                         ),
@@ -153,5 +151,22 @@ internal fun MainApp(
             onClearMessage = qrViewModel::clearMessage,
             onDismiss = { showQrFlow = false },
         )
+
+        if (showAccountSwitcher) {
+            AccountSwitcherSheet(
+                account = account,
+                canAddAccount = accounts.canAddAccount,
+                onSwitch = { admno ->
+                    showAccountSwitcher = false
+                    if (admno != account.activeAdmno) accounts.onSwitch(admno)
+                },
+                onAddAccount = {
+                    showAccountSwitcher = false
+                    accounts.onAdd()
+                },
+                onRemove = accounts.onRemove,
+                onDismiss = { showAccountSwitcher = false },
+            )
+        }
     }
 }

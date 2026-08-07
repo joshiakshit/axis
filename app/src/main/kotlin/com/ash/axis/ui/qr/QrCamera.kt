@@ -10,22 +10,17 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import com.ash.core.ui.theme.AppShapes
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
@@ -50,17 +45,14 @@ internal fun FrontCameraPreview(
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
     onReady: (ImageCapture) -> Unit,
     onError: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     DisposableEffect(Unit) {
         onDispose { unbindCamera(context) }
     }
     AndroidView(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .height(320.dp)
-                .clip(AppShapes.medium),
+        modifier = modifier,
         factory = { viewContext ->
             PreviewView(viewContext).apply {
                 scaleType = PreviewView.ScaleType.FILL_CENTER
@@ -84,6 +76,7 @@ internal fun QrCameraPreview(
     onError: (String) -> Unit,
     onCameraBound: (androidx.camera.core.Camera) -> Unit = {},
     onPinchZoom: (Float) -> Unit = {},
+    modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val analyzerExecutor = remember { Executors.newSingleThreadExecutor() }
@@ -96,12 +89,7 @@ internal fun QrCameraPreview(
         }
     }
     Box(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .clip(AppShapes.medium)
-                .clipToBounds(),
+        modifier = modifier.clipToBounds(),
     ) {
         AndroidView(
             modifier =

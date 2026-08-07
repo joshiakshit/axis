@@ -69,9 +69,11 @@ class AuthRepository
                     ),
                 )
 
+            val data = response.data
             val token =
-                response.data?.token
-                    ?: error("Login response did not include tokens")
+                data?.token
+                    // Surface the server's own message (e.g. the "another device" lock) instead of a generic error.
+                    ?: error(data?.message?.takeIf { it.isNotBlank() } ?: "Login response did not include tokens")
 
             val userInfo = decodeUserInfo(token.accessToken)
             tokenManager.setActiveAdmno(userInfo.admno)

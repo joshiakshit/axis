@@ -11,7 +11,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -23,62 +22,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.ash.core.ui.theme.AppShapes
-import com.ash.core.ui.theme.cardColor
-
-private val navRouteOptions =
-    listOf(
-        "dashboard" to "Dashboard",
-        "attendance" to "Attendance",
-        "timetable" to "Timetable",
-        "planner" to "Planner",
-    )
-
-@Composable
-internal fun HomePagePicker(
-    defaultPage: String,
-    onSelect: (String) -> Unit,
-) {
-    SettingsCard {
-        Text("Home Page", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            navRouteOptions.forEach { (route, label) ->
-                val selected = defaultPage == route
-                Surface(
-                    modifier = Modifier.weight(1f),
-                    selected = selected,
-                    onClick = { onSelect(route) },
-                    shape = AppShapes.small,
-                    color =
-                        if (selected) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            cardColor()
-                        },
-                ) {
-                    Text(
-                        label,
-                        modifier = Modifier.padding(vertical = 8.dp),
-                        textAlign = TextAlign.Center,
-                        fontSize = 11.sp,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                        color =
-                            if (selected) {
-                                MaterialTheme.colorScheme.onPrimary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                    )
-                }
-            }
-        }
-    }
-}
 
 @Composable
 internal fun SecuritySettings(

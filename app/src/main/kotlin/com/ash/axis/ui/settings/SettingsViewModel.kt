@@ -27,8 +27,6 @@ data class SettingsUiState(
     val admno: String = "",
     val themeMode: ThemeMode = ThemeMode.DARK,
     val colorProfile: String = ColorProfiles.Default.name,
-    val compactNavBar: Boolean = false,
-    val defaultPage: String = "dashboard",
     val threshold: Int = 75,
     val semesterEndDate: String = "",
     val selectedSemester: SemesterOption? = null,
@@ -37,11 +35,7 @@ data class SettingsUiState(
     val combinedAttendance: Boolean = false,
     val isClearing: Boolean = false,
     val deviceId: String = "",
-) {
-    companion object {
-        val validPages = listOf("dashboard", "attendance", "timetable", "planner")
-    }
-}
+)
 
 @HiltViewModel
 class SettingsViewModel
@@ -65,8 +59,6 @@ class SettingsViewModel
                 val user = authRepository.getUserInfo()
                 val themeStr = preferencesStore.getString("theme_mode", ThemeMode.DARK.name).first()
                 val profile = preferencesStore.getString("color_profile", ColorProfiles.Default.name).first()
-                val compactNavBar = preferencesStore.getBoolean("compact_nav_bar").first()
-                val defaultPage = preferencesStore.getString("default_page", "dashboard").first()
                 val threshold = preferencesStore.getUserInt("attendance_threshold", 75).first()
                 val semesterEnd = preferencesStore.getUserString("semester_end_date", "").first()
                 val combinedAttendance = preferencesStore.getUserBoolean("combined_attendance").first()
@@ -89,8 +81,6 @@ class SettingsViewModel
                         admno = user?.admno ?: "",
                         themeMode = ThemeMode.entries.find { m -> m.name == themeStr } ?: ThemeMode.DARK,
                         colorProfile = profile,
-                        compactNavBar = compactNavBar,
-                        defaultPage = defaultPage.takeIf { route -> route in SettingsUiState.validPages } ?: "dashboard",
                         threshold = threshold,
                         semesterEndDate = semesterEnd,
                         selectedSemester = selectedSemester,
@@ -114,21 +104,6 @@ class SettingsViewModel
             viewModelScope.launch {
                 preferencesStore.putString("color_profile", name)
                 _state.update { it.copy(colorProfile = name) }
-            }
-        }
-
-        fun setCompactNavBar(enabled: Boolean) {
-            viewModelScope.launch {
-                preferencesStore.putBoolean("compact_nav_bar", enabled)
-                _state.update { it.copy(compactNavBar = enabled) }
-            }
-        }
-
-        fun setDefaultPage(route: String) {
-            if (route !in SettingsUiState.validPages) return
-            viewModelScope.launch {
-                preferencesStore.putString("default_page", route)
-                _state.update { it.copy(defaultPage = route) }
             }
         }
 

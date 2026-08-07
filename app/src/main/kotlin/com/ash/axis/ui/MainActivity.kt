@@ -11,7 +11,6 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
-import com.ash.axis.data.repository.AuthRepository
 import com.ash.core.storage.PreferencesStore
 import com.ash.core.ui.theme.AppTheme
 import com.ash.core.ui.theme.ColorProfiles
@@ -27,8 +26,6 @@ import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
-    @Inject lateinit var authRepository: AuthRepository
-
     @Inject lateinit var preferencesStore: PreferencesStore
 
     private val qrScanRequests = MutableStateFlow(0)
@@ -36,7 +33,7 @@ class MainActivity : FragmentActivity() {
     private data class StartupData(
         val themeMode: String,
         val colorProfile: String,
-        val loggedIn: Boolean,
+        val startRoute: String,
     )
 
     override fun onNewIntent(intent: Intent) {
@@ -64,7 +61,7 @@ class MainActivity : FragmentActivity() {
                             preferencesStore
                                 .getString("color_profile", ColorProfiles.Default.name)
                                 .first(),
-                        loggedIn = authRepository.isLoggedIn(),
+                        startRoute = preferencesStore.getString("last_route", "dashboard").first(),
                     )
                 }
         }
@@ -87,9 +84,9 @@ class MainActivity : FragmentActivity() {
 
             AppTheme(themeState = themeState) {
                 SessionGate(
-                    initiallyLoggedIn = startupData.loggedIn,
                     preferencesStore = preferencesStore,
                     qrScanRequest = qrScanRequest,
+                    startRoute = startupData.startRoute,
                 )
             }
         }

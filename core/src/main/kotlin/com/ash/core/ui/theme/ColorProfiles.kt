@@ -3,6 +3,14 @@ package com.ash.core.ui.theme
 import android.os.Build
 import androidx.compose.ui.graphics.Color
 
+// Shared pitch-black dark-mode neutrals. The single accent profile sits on this true-black, de-blued canvas.
+private val DarkBg = Color(0xFF000000) // true black canvas (OLED)
+private val DarkOnBg = Color(0xFFF2F2F4) // near-white text (softened)
+private val DarkSurface = Color(0xFF0C0C0E) // cards: barely-raised near-black
+private val DarkSurfaceVariant = Color(0xFF151517)
+private val DarkOnSurfaceVariant = Color(0xFF8A8A90) // neutral gray (de-blued)
+private val DarkOutline = Color(0xFF262628) // hairline neutral border
+
 data class ColorProfile(
     val name: String,
     val primary: Color,
@@ -24,99 +32,28 @@ data class ColorProfile(
 )
 
 object ColorProfiles {
-    val Iris =
-        ColorProfile(
-            name = "iris",
-            primary = Color(0xFF7C5CFC),
-            onPrimary = Color.White,
-            primaryContainer = Color(0xFF2A1F5E),
-            onPrimaryContainer = Color(0xFFE0D6FF),
-            secondary = Color(0xFF9B8AFF),
-            onSecondary = Color.White,
-            background = Color(0xFF0B0F17),
-            onBackground = Color(0xFFE6EDF6),
-            surface = Color(0xFF141A24),
-            onSurface = Color(0xFFE6EDF6),
-            surfaceVariant = Color(0xFF1A2230),
-            onSurfaceVariant = Color(0xFF9AA6B8),
-            outline = Color(0xFF222B3A),
-        )
-
-    val Forest =
-        ColorProfile(
-            name = "forest",
-            primary = Color(0xFF34C759),
-            onPrimary = Color.White,
-            primaryContainer = Color(0xFF0D3B1A),
-            onPrimaryContainer = Color(0xFFB8F5C8),
-            secondary = Color(0xFF66D98A),
-            onSecondary = Color.White,
-            background = Color(0xFF0B0F17),
-            onBackground = Color(0xFFE6EDF6),
-            surface = Color(0xFF141A24),
-            onSurface = Color(0xFFE6EDF6),
-            surfaceVariant = Color(0xFF1A2230),
-            onSurfaceVariant = Color(0xFF9AA6B8),
-            outline = Color(0xFF222B3A),
-        )
-
+    // Single, toned-down accent. Muted steel-blue instead of the old vivid blue — used sparingly on black.
     val Slate =
         ColorProfile(
             name = "slate",
-            primary = Color(0xFF4B8EF5),
+            primary = Color(0xFF6E90C0),
             onPrimary = Color.White,
-            primaryContainer = Color(0xFF0D2B5E),
-            onPrimaryContainer = Color(0xFFBBD5FF),
-            secondary = Color(0xFF77AAFF),
+            primaryContainer = Color(0xFF16202C),
+            onPrimaryContainer = Color(0xFFB4C6DA),
+            secondary = Color(0xFF8FA9CC),
             onSecondary = Color.White,
-            background = Color(0xFF0B0F17),
-            onBackground = Color(0xFFE6EDF6),
-            surface = Color(0xFF141A24),
-            onSurface = Color(0xFFE6EDF6),
-            surfaceVariant = Color(0xFF1A2230),
-            onSurfaceVariant = Color(0xFF9AA6B8),
-            outline = Color(0xFF222B3A),
-        )
-
-    val Amber =
-        ColorProfile(
-            name = "amber",
-            primary = Color(0xFFF59E0B),
-            onPrimary = Color.Black,
-            primaryContainer = Color(0xFF3D2700),
-            onPrimaryContainer = Color(0xFFFFDEA1),
-            secondary = Color(0xFFFFBB33),
-            onSecondary = Color.Black,
-            background = Color(0xFF0B0F17),
-            onBackground = Color(0xFFE6EDF6),
-            surface = Color(0xFF141A24),
-            onSurface = Color(0xFFE6EDF6),
-            surfaceVariant = Color(0xFF1A2230),
-            onSurfaceVariant = Color(0xFF9AA6B8),
-            outline = Color(0xFF222B3A),
-        )
-
-    val Crimson =
-        ColorProfile(
-            name = "crimson",
-            primary = Color(0xFFEF4444),
-            onPrimary = Color.White,
-            primaryContainer = Color(0xFF3B0D0D),
-            onPrimaryContainer = Color(0xFFFFBBBB),
-            secondary = Color(0xFFFF6B6B),
-            onSecondary = Color.White,
-            background = Color(0xFF0B0F17),
-            onBackground = Color(0xFFE6EDF6),
-            surface = Color(0xFF141A24),
-            onSurface = Color(0xFFE6EDF6),
-            surfaceVariant = Color(0xFF1A2230),
-            onSurfaceVariant = Color(0xFF9AA6B8),
-            outline = Color(0xFF222B3A),
+            background = DarkBg,
+            onBackground = DarkOnBg,
+            surface = DarkSurface,
+            onSurface = DarkOnBg,
+            surfaceVariant = DarkSurfaceVariant,
+            onSurfaceVariant = DarkOnSurfaceVariant,
+            outline = DarkOutline,
         )
 
     val Default = Slate
 
-    val all = listOf(Iris, Slate, Crimson)
+    val all = listOf(Slate)
 
     const val DYNAMIC_NAME = "dynamic"
 

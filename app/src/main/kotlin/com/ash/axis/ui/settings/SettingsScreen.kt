@@ -46,12 +46,6 @@ fun SettingsScreen(
 
         item { SectionLabel("APPEARANCE") }
         item { ThemeSelector(state.themeMode, viewModel::setThemeMode) }
-        item { ColorProfileSelector(state.colorProfile, viewModel::setColorProfile) }
-        item {
-            SettingsCard {
-                ToggleRow("Compact navbar", state.compactNavBar, viewModel::setCompactNavBar)
-            }
-        }
 
         item { SectionLabel("ATTENDANCE") }
         item {
@@ -68,9 +62,6 @@ fun SettingsScreen(
                 onCombinedAttendanceChange = viewModel::setCombinedAttendance,
             )
         }
-
-        item { SectionLabel("APP FLOW") }
-        item { HomePagePicker(state.defaultPage, viewModel::setDefaultPage) }
 
         item { SectionLabel("SECURITY & DATA") }
         item { SecuritySettings(state, viewModel) }

@@ -36,6 +36,7 @@ import kotlinx.collections.immutable.toImmutableSet
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -57,6 +58,8 @@ data class PlannerUiState(
     val overallTotal: Int = 0,
     val subjects: ImmutableList<PlannerSubject> = persistentListOf(),
     val timetable: ImmutableMap<String, ImmutableList<TimetableSlot>> = persistentMapOf(),
+    // Real per-date future timetable used to decide which days are selectable in the simulator.
+    val dateTimetable: ImmutableMap<LocalDate, ImmutableList<TimetableSlot>> = persistentMapOf(),
     val daySafety: ImmutableList<DaySafety> = persistentListOf(),
     val forecast: ImmutableList<ForecastRow> = persistentListOf(),
     val selectedDates: ImmutableSet<LocalDate> = persistentSetOf(),
@@ -68,6 +71,7 @@ data class PlannerUiState(
     val tomorrowSlots: ImmutableList<TomorrowClass> = persistentListOf(),
     val isRefreshing: Boolean = false,
     val simulatorMonth: LocalDate = LocalDate.now().withDayOfMonth(1),
+    val semesterEndSet: Boolean = false,
     val isOffline: Boolean = false,
 )
 
@@ -195,7 +199,13 @@ class PlannerViewModel
                             .thenBy { it.delta },
                     ).toImmutableList()
                 }
-            return base.copy(projected = projected)
+            return base.copy(projected = projected, dateTimetable = immutableDateTimetable())
+        }
+
+        fun setSemesterEndDate(dateStr: String) {
+            viewModelScope.launch {
+                preferencesStore.putUserString("semester_end_date", dateStr)
+            }
         }
 
         fun clearDates() {
@@ -210,8 +220,26 @@ class PlannerViewModel
         }
 
         fun shiftSimulatorMonth(delta: Int) {
-            _state.update { it.copy(simulatorMonth = it.simulatorMonth.plusMonths(delta.toLong())) }
+            val newMonth = _state.value.simulatorMonth.plusMonths(delta.toLong())
+            _state.update { it.copy(simulatorMonth = newMonth) }
+            viewModelScope.launch {
+                ensureDateCoverage(newMonth.withDayOfMonth(newMonth.lengthOfMonth()))
+                _state.update { it.copy(dateTimetable = immutableDateTimetable()) }
+            }
         }
+
+        // Extend the date-keyed timetable cache so the grid always has real data for the visible month.
+        private suspend fun ensureDateCoverage(end: LocalDate) {
+            val range = dateTimetableRange
+            if (range == null || end.isAfter(range.second)) {
+                fetchDateTimetable(LocalDate.now(), maxOf(end, range?.second ?: end))
+            }
+        }
+
+        private fun immutableDateTimetable(): ImmutableMap<LocalDate, ImmutableList<TimetableSlot>> =
+            dateTimetableCache
+                .mapValues { (_, slots) -> slots.toImmutableList() }
+                .toImmutableMap()
 
         @Suppress("LongMethod")
         private fun load(forceRefresh: Boolean) {
@@ -317,6 +345,7 @@ class PlannerViewModel
                                 overallTotal = attendance.endrow.total,
                                 subjects = computed.subjects.toImmutableList(),
                                 timetable = immutableTimetable,
+                                dateTimetable = immutableDateTimetable(),
                                 daySafety = computed.daySafety.toImmutableList(),
                                 totalSpare = computed.totalSpare,
                                 tomorrowSlots = tomorrowClasses.toImmutableList(),
@@ -324,6 +353,7 @@ class PlannerViewModel
                                 selectedDates = persistentSetOf(),
                                 anchorDate = null,
                                 projected = persistentListOf(),
+                                semesterEndSet = cachedSemesterEnd != null,
                                 isOffline = offline,
                             )
                         }
@@ -346,13 +376,7 @@ class PlannerViewModel
                     val user = authRepository.getUserInfo()
                     if (user != null) {
                         val acadYear = cachedAcadYear.ifBlank { timetableUseCase.getAcadYear() }
-                        timetableRepo.getDateKeyedTimetable(
-                            user.admno,
-                            user.brId,
-                            acadYear,
-                            start.toString(),
-                            end.toString(),
-                        )
+                        fetchDateKeyedRange(user.admno, user.brId, acadYear, start, end, forceRefresh = false)
                     } else {
                         emptyMap()
                     }
@@ -373,19 +397,46 @@ class PlannerViewModel
             val (start, end) = range
             val apiData =
                 runCatching {
-                    timetableRepo.getDateKeyedTimetable(
-                        user.admno,
-                        user.brId,
-                        acadYear,
-                        start.toString(),
-                        end.toString(),
-                        forceRefresh,
-                    )
+                    fetchDateKeyedRange(user.admno, user.brId, acadYear, start, end, forceRefresh)
                 }.getOrDefault(emptyMap())
 
             dateTimetableCache = mergeWithWeeklyFallback(apiData, weekly, start, end)
             dateTimetableRange = start to end
         }
+
+        // The timetable endpoint serves one Mon–Sun week per request, so a single wide-range call only
+        // returns one week. Fetch every week that overlaps [start, end] in parallel and merge them.
+        private suspend fun fetchDateKeyedRange(
+            admno: String,
+            brId: Int,
+            acadYear: String,
+            start: LocalDate,
+            end: LocalDate,
+            forceRefresh: Boolean,
+        ): Map<LocalDate, List<TimetableSlot>> =
+            coroutineScope {
+                val weekStarts =
+                    generateSequence(start.with(java.time.DayOfWeek.MONDAY)) { it.plusWeeks(1) }
+                        .takeWhile { !it.isAfter(end) }
+                        .toList()
+                weekStarts
+                    .map { weekStart ->
+                        async {
+                            runCatching {
+                                timetableRepo.getDateKeyedTimetable(
+                                    admno,
+                                    brId,
+                                    acadYear,
+                                    weekStart.toString(),
+                                    weekStart.plusDays(6).toString(),
+                                    forceRefresh,
+                                )
+                            }.getOrDefault(emptyMap())
+                        }
+                    }
+                    .awaitAll()
+                    .fold(mutableMapOf<LocalDate, List<TimetableSlot>>()) { acc, week -> acc.apply { putAll(week) } }
+            }
 
         private fun mergeWithWeeklyFallback(
             apiData: Map<LocalDate, List<TimetableSlot>>,
