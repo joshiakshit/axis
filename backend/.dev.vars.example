@@ -1,0 +1,11 @@
+# Copy to `.dev.vars` for local `wrangler dev`. Never commit the real file.
+
+# Required to use PUT /v1/config. Use a long random string.
+ADMIN_TOKEN=change-me-to-a-long-random-secret
+
+# Optional: seed the iCloudEMS bearer before anything is written to KV.
+# Leave blank to let the app keep using its compiled-in BuildConfig token.
+DEFAULT_AUTH_TOKEN=
+
+# Optional: when set, GET /v1/config requires a matching `x-axis-key` header.
+APP_ACCESS_KEY=

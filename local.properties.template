@@ -1,2 +1,5 @@
 sdk.dir=C\:\\Users\\YOUR_USER\\AppData\\Local\\Android\\Sdk
 API_AUTH_TOKEN=
+# Optional: base URL of the Axis backend Worker (e.g. https://axis-backend.<sub>.workers.dev/).
+# Leave blank to disable remote config — the app then uses only its compiled-in token/appversion.
+REMOTE_CONFIG_URL=

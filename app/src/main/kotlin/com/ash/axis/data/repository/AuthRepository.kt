@@ -2,6 +2,7 @@ package com.ash.axis.data.repository
 
 import android.util.Base64
 import com.ash.axis.data.api.AuthApi
+import com.ash.axis.data.config.RemoteConfigRepository
 import com.ash.axis.domain.model.JwtPayload
 import com.ash.axis.domain.model.UserInfo
 import com.ash.core.security.TokenManager
@@ -23,12 +24,9 @@ class AuthRepository
     constructor(
         private val authApi: AuthApi,
         private val tokenManager: TokenManager,
+        private val remoteConfig: RemoteConfigRepository,
         private val json: Json,
     ) {
-        private companion object {
-            const val APP_VERSION = "3.0.3"
-        }
-
         private val refreshMutex = Mutex()
 
         suspend fun requestOtp(
@@ -43,7 +41,7 @@ class AuthRepository
                         "contact" to contact,
                         "lastmodifiedby" to contact,
                         "deviceid" to deviceId,
-                        "appversion" to APP_VERSION,
+                        "appversion" to remoteConfig.appVersion(),
                     ),
                 )
             return response.data?.username ?: contact
@@ -65,7 +63,7 @@ class AuthRepository
                         "username" to username,
                         "lastmodifiedby" to contact,
                         "deviceid" to deviceId,
-                        "appversion" to APP_VERSION,
+                        "appversion" to remoteConfig.appVersion(),
                     ),
                 )
 

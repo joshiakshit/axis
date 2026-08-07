@@ -16,6 +16,7 @@ val localProps =
         if (f.exists()) load(f.inputStream())
     }
 val apiAuthToken = localProps.getProperty("API_AUTH_TOKEN", "")
+val remoteConfigUrl = localProps.getProperty("REMOTE_CONFIG_URL", "")
 val releaseStoreFile = localProps.getProperty("RELEASE_STORE_FILE", "")
 val releaseStorePassword = localProps.getProperty("RELEASE_STORE_PASSWORD", "")
 val releaseKeyAlias = localProps.getProperty("RELEASE_KEY_ALIAS", "")
@@ -35,6 +36,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "API_AUTH_TOKEN", "\"$apiAuthToken\"")
+        buildConfigField("String", "REMOTE_CONFIG_URL", "\"$remoteConfigUrl\"")
     }
 
     signingConfigs {

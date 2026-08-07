@@ -6,6 +6,8 @@ import com.ash.axis.BuildConfig
 import com.ash.axis.data.api.AuthApi
 import com.ash.axis.data.api.ICloudEmsApi
 import com.ash.axis.data.api.QrAttendanceApi
+import com.ash.axis.data.api.RemoteConfigApi
+import com.ash.axis.data.config.RemoteConfigRepository
 import com.ash.axis.data.db.AppDatabase
 import com.ash.axis.data.db.CacheDao
 import com.ash.axis.tenant.Tenants
@@ -29,10 +31,32 @@ import javax.inject.Singleton
 object AppModule {
     @Provides
     @Singleton
-    fun provideSecretProvider(): SecretProvider =
+    fun provideSecretProvider(remoteConfig: RemoteConfigRepository): SecretProvider =
         object : SecretProvider {
-            override val apiAuthToken: String = BuildConfig.API_AUTH_TOKEN
+            // Read per request so a rotated token from the backend takes effect without a restart; falls
+            // back to the compiled-in token when remote config is disabled or hasn't provided one.
+            override val apiAuthToken: String
+                get() = remoteConfig.effectiveAuthToken(BuildConfig.API_AUTH_TOKEN)
         }
+
+    // Null when the build has no REMOTE_CONFIG_URL — that disables remote config entirely (RemoteConfigRepository
+    // no-ops), so the app runs on its compiled-in defaults. Uses the shared client (no SecretProvider dep → no cycle).
+    @Provides
+    @Singleton
+    fun provideRemoteConfigApi(
+        client: OkHttpClient,
+        json: Json,
+    ): RemoteConfigApi? {
+        val base = BuildConfig.REMOTE_CONFIG_URL
+        if (base.isBlank()) return null
+        val normalized = if (base.endsWith("/")) base else "$base/"
+        return Retrofit.Builder()
+            .baseUrl(normalized)
+            .client(client)
+            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .build()
+            .create(RemoteConfigApi::class.java)
+    }
 
     @Provides
     @Singleton

@@ -1,0 +1,21 @@
+name = "axis-backend"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+# Config store. Create with:  wrangler kv namespace create CONFIG
+# then paste the printed id below. `wrangler dev` simulates KV locally, so the placeholder is fine for dev.
+[[kv_namespaces]]
+binding = "CONFIG"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+[vars]
+DEFAULT_APP_VERSION = "3.0.3"
+DEFAULT_TENANT = "gu"
+
+# Secrets (never put these here — set with `wrangler secret put <NAME>`):
+#   ADMIN_TOKEN        required to write config
+#   DEFAULT_AUTH_TOKEN optional seed for the iCloudEMS bearer before first write
+#   APP_ACCESS_KEY     optional soft gate for GET /v1/config
+
+[observability]
+enabled = true

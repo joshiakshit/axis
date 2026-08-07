@@ -1,0 +1,23 @@
+{
+  "name": "axis-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Axis backend — remote config for the Axis Android app (Cloudflare Worker).",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260801.1",
+    "typescript": "^5.4.0",
+    "vitest": "^3.0.0",
+    "wrangler": "^4.20.0"
+  },
+  "allowScripts": {
+    "workerd@1.20260801.1": true,
+    "esbuild@0.28.1": true
+  }
+}
