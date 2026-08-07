@@ -2,6 +2,7 @@ package com.ash.axis.ui.timetable
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.ash.axis.data.export.ExportKeys
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
 import com.ash.axis.data.repository.SELECTED_SEMESTER_CLASS_KEY
@@ -103,6 +104,7 @@ class TimetableViewModel
         // neighbours, so crossing a week boundary is instant) is loaded.
         fun onDateShown(date: LocalDate) {
             if (_state.value.currentDate != date) _state.update { it.copy(currentDate = date) }
+            persistViewDate(date)
             ensureWeek(date)
             ensureWeek(date.plusDays(1))
             ensureWeek(date.minusDays(1))
@@ -111,7 +113,13 @@ class TimetableViewModel
         // Teleport to any date (date picker / Today button / day-strip tap).
         fun jumpTo(date: LocalDate) {
             _state.update { it.copy(currentDate = date, jumpTarget = date) }
+            persistViewDate(date)
             ensureWeek(date)
+        }
+
+        // Mirror the viewed date so "Export timetable" in Settings targets the week the user is looking at.
+        private fun persistViewDate(date: LocalDate) {
+            viewModelScope.launch { preferencesStore.putUserString(ExportKeys.TIMETABLE_VIEW_DATE, date.toString()) }
         }
 
         fun consumeJump() {

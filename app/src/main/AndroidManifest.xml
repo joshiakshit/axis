@@ -18,6 +18,7 @@
             android:name=".ui.MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
+            android:screenOrientation="portrait"
             android:theme="@style/Theme.Axis.Starting">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -1,5 +1,6 @@
 package com.ash.axis.ui.settings
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
@@ -12,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -32,6 +34,13 @@ fun SettingsScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
+    LaunchedEffect(state.exportMessage) {
+        state.exportMessage?.let {
+            Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            viewModel.consumeExportMessage()
+        }
+    }
+
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = AppDimens.screenPadding),
@@ -46,6 +55,7 @@ fun SettingsScreen(
 
         item { SectionLabel("APPEARANCE") }
         item { ThemeSelector(state.themeMode, viewModel::setThemeMode) }
+        item { AccentSelector(state.accentHex, state.customAccents, viewModel::setAccent) }
 
         item { SectionLabel("ATTENDANCE") }
         item {
@@ -60,6 +70,15 @@ fun SettingsScreen(
                 onSemesterEndDateChange = viewModel::setSemesterEndDate,
                 combinedAttendance = state.combinedAttendance,
                 onCombinedAttendanceChange = viewModel::setCombinedAttendance,
+            )
+        }
+
+        item { SectionLabel("EXPORT") }
+        item {
+            ExportSettings(
+                isExporting = state.isExporting,
+                onExportAttendance = viewModel::exportAttendance,
+                onExportTimetable = viewModel::exportTimetable,
             )
         }
 

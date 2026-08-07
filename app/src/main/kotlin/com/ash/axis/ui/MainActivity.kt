@@ -33,6 +33,7 @@ class MainActivity : FragmentActivity() {
     private data class StartupData(
         val themeMode: String,
         val colorProfile: String,
+        val accentColor: String,
         val startRoute: String,
     )
 
@@ -61,6 +62,7 @@ class MainActivity : FragmentActivity() {
                             preferencesStore
                                 .getString("color_profile", ColorProfiles.Default.name)
                                 .first(),
+                        accentColor = preferencesStore.getString("accent_color", "").first(),
                         startRoute = preferencesStore.getString("last_route", "dashboard").first(),
                     )
                 }
@@ -75,11 +77,15 @@ class MainActivity : FragmentActivity() {
             val colorProfile by preferencesStore
                 .getString("color_profile", ColorProfiles.Default.name)
                 .collectAsStateWithLifecycle(initialValue = startupData.colorProfile)
+            val accentColor by preferencesStore
+                .getString("accent_color", "")
+                .collectAsStateWithLifecycle(initialValue = startupData.accentColor)
 
             val themeState =
                 ThemeState(
                     mode = ThemeMode.entries.find { it.name == themeModeStr } ?: ThemeMode.DARK,
                     profileName = colorProfile,
+                    accentHex = accentColor,
                 )
 
             AppTheme(themeState = themeState) {
