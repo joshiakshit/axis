@@ -1,6 +1,5 @@
 package com.ash.axis.ui
 
-import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,7 +7,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -17,13 +15,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ash.axis.BuildConfig
 import com.ash.axis.data.config.RemoteConfigRepository
+import com.ash.axis.ui.update.UpdateButton
 import kotlinx.coroutines.launch
 
 // The backend's safety valve. Reacts to remote config: a kill-switch or a version floor above this build
@@ -43,15 +40,13 @@ fun RemoteConfigGate(
             BlockedScreen(
                 title = "Axis is paused",
                 message = config.message.ifBlank { "Axis is temporarily unavailable. Please try again shortly." },
-                updateUrl = null,
                 onRetry = onRetry,
             )
 
         BuildConfig.VERSION_CODE < config.minSupportedVersionCode ->
-            BlockedScreen(
-                title = "Update required",
+            UpdateRequiredScreen(
                 message = config.message.ifBlank { "A newer version of Axis is required to continue." },
-                updateUrl = config.updateUrl.ifBlank { null },
+                updateUrl = config.updateUrl,
                 onRetry = onRetry,
             )
 
@@ -60,13 +55,36 @@ fun RemoteConfigGate(
 }
 
 @Composable
+private fun UpdateRequiredScreen(
+    message: String,
+    updateUrl: String,
+    onRetry: () -> Unit,
+) {
+    GateScaffold(title = "Update required", message = message) {
+        if (updateUrl.isNotBlank()) {
+            UpdateButton(url = updateUrl, label = "Update now")
+        }
+        TextButton(onClick = onRetry) { Text("Retry") }
+    }
+}
+
+@Composable
 private fun BlockedScreen(
     title: String,
     message: String,
-    updateUrl: String?,
     onRetry: () -> Unit,
 ) {
-    val context = LocalContext.current
+    GateScaffold(title = title, message = message) {
+        TextButton(onClick = onRetry) { Text("Retry") }
+    }
+}
+
+@Composable
+private fun GateScaffold(
+    title: String,
+    message: String,
+    actions: @Composable () -> Unit,
+) {
     Box(
         modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
         contentAlignment = Alignment.Center,
@@ -87,23 +105,7 @@ private fun BlockedScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
-            if (updateUrl != null) {
-                Button(
-                    onClick = {
-                        runCatching {
-                            context.startActivity(
-                                Intent(Intent.ACTION_VIEW, updateUrl.toUri())
-                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                            )
-                        }
-                    },
-                ) {
-                    Text("Update")
-                }
-            }
-            TextButton(onClick = onRetry) {
-                Text("Retry")
-            }
+            actions()
         }
     }
 }

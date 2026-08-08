@@ -10,10 +10,18 @@ id = "b200a28fe55042828366f54754224ef6"
 
 # User governance store. Create with:  wrangler d1 create axis
 # then paste the printed database_id below. `wrangler dev` simulates D1 locally.
+# After schema changes run:  wrangler d1 migrations apply axis --remote
 [[d1_databases]]
 binding = "DB"
 database_name = "axis"
 database_id = "d53d64f6-43c2-4e63-8b12-66ea3759c35d"
+
+# Optional: self-hosted one-tap updates. Enable R2, then:  wrangler r2 bucket create axis-apk
+# and uncomment this block. Until then the /v1/apk endpoints 503 and you can host the APK anywhere
+# (set updateUrl to any direct .apk link). `wrangler dev` simulates R2 locally.
+# [[r2_buckets]]
+# binding = "APK"
+# bucket_name = "axis-apk"
 
 [vars]
 DEFAULT_APP_VERSION = "3.0.3"

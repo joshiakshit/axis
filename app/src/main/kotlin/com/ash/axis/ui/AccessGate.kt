@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -19,12 +18,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ash.axis.data.session.AxisSession
 
-// Governance gate: re-checks access for the active account, then shows the app, a "waiting for approval"
-// screen (only on an explicit `pending`), or a brief spinner while the first check is in flight. When
-// governance is disabled (no backend) it falls straight through to `content`.
+// Governance gate. Deliberately *load-first*: the app renders immediately and the access check runs in the
+// background, so governance never adds to startup time. Only an explicit `pending` verdict swaps in the
+// waiting screen; unknown / offline / disabled all fall through (fail-open). The check re-runs on every
+// resume, so a revoke (Kick) lands the next time the user foregrounds the app — that's the "instant" part.
 @Composable
 internal fun AccessGate(
     activeAdmno: String?,
@@ -33,14 +35,42 @@ internal fun AccessGate(
     val viewModel: AccessViewModel = hiltViewModel()
     val access by viewModel.state.collectAsStateWithLifecycle()
 
+    // Re-check when the active account changes (switch) and on every resume (foreground). Both are cheap and
+    // off the render path, so neither delays the UI.
     LaunchedEffect(activeAdmno) { viewModel.refresh() }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
 
     when {
         !access.enabled -> content()
         access.status == AxisSession.STATUS_PENDING -> PendingScreen(onRetry = viewModel::refresh)
-        access.status == AxisSession.STATUS_APPROVED -> content()
-        access.checking -> CheckingScreen()
+        access.status == AxisSession.STATUS_BANNED -> BannedScreen()
         else -> content()
+    }
+}
+
+@Composable
+private fun BannedScreen() {
+    Box(
+        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                "Access revoked",
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Text(
+                "Your access to Axis has been removed by the admin.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 
@@ -70,15 +100,5 @@ private fun PendingScreen(onRetry: () -> Unit) {
                 Text("Check again")
             }
         }
-    }
-}
-
-@Composable
-private fun CheckingScreen() {
-    Box(
-        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
-        contentAlignment = Alignment.Center,
-    ) {
-        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
     }
 }

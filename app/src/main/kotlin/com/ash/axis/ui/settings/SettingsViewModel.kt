@@ -13,6 +13,7 @@ import com.ash.axis.data.repository.SELECTED_SEMESTER_CLASS_KEY
 import com.ash.axis.data.repository.SELECTED_SEMESTER_YEAR_KEY
 import com.ash.axis.data.repository.TimetableRepository
 import com.ash.axis.data.session.AxisSessionRepository
+import com.ash.axis.data.session.UsageReporter
 import com.ash.axis.domain.model.SemesterOption
 import com.ash.axis.ui.ErrorText
 import com.ash.core.storage.PreferencesStore
@@ -60,6 +61,7 @@ class SettingsViewModel
         private val timetableRepo: TimetableRepository,
         private val dataExporter: DataExporter,
         private val axisSession: AxisSessionRepository,
+        private val usageReporter: UsageReporter,
         @ApplicationContext private val appContext: Context,
     ) : ViewModel() {
         private val _state = MutableStateFlow(SettingsUiState())
@@ -176,6 +178,7 @@ class SettingsViewModel
                     } else {
                         share(export)
                     }
+                    usageReporter.log(UsageReporter.EXPORT)
                 } catch (e: Exception) {
                     _state.update { it.copy(exportMessage = ErrorText.forData(e)) }
                 } finally {
@@ -191,6 +194,7 @@ class SettingsViewModel
                 _state.update { it.copy(isExporting = true) }
                 try {
                     share(block())
+                    usageReporter.log(UsageReporter.EXPORT)
                 } catch (e: Exception) {
                     _state.update { it.copy(exportMessage = ErrorText.forData(e)) }
                 } finally {

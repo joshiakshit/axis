@@ -1,7 +1,10 @@
 package com.ash.axis.data.session
 
+import android.os.Build
 import android.util.Log
+import com.ash.axis.BuildConfig
 import com.ash.axis.data.api.AxisBackendApi
+import com.ash.axis.data.config.RemoteConfig
 import com.ash.core.security.TokenManager
 import com.ash.core.storage.PreferencesStore
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,6 +25,10 @@ data class Access(
     val role: String,
     val checking: Boolean,
 )
+
+// Admin verdict applied to a governed user. ALLOW → approved, KICK → pending (re-login re-requests),
+// BAN → banned (survives re-login).
+enum class UserAction { ALLOW, KICK, BAN }
 
 // Client half of the governance layer. Calls POST /v1/session for the active account, caches the result
 // per-admno, and hands the gate/admin UI the current access + admin session token. `api` is null when the
@@ -66,7 +73,7 @@ class AxisSessionRepository
             val access = tokenManager.getAccessToken() ?: return
             mutableState.update { it.copy(checking = true) }
             try {
-                val session = client.session(SessionRequest(access))
+                val session = client.session(sessionRequest(access))
                 preferencesStore.putUserString(KEY, json.encodeToString(session))
                 publish(session)
             } catch (e: Exception) {
@@ -76,6 +83,16 @@ class AxisSessionRepository
             }
         }
 
+        // The active token plus best-effort device/build telemetry for the admin dashboard.
+        private fun sessionRequest(token: String) =
+            SessionRequest(
+                token = token,
+                appVersionName = BuildConfig.VERSION_NAME,
+                appVersionCode = BuildConfig.VERSION_CODE,
+                deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}".trim(),
+                androidSdk = Build.VERSION.SDK_INT,
+            )
+
         suspend fun listUsers(): List<AdminUser> {
             val client = api ?: return emptyList()
             val auth = authHeader() ?: return emptyList()
@@ -84,11 +101,51 @@ class AxisSessionRepository
 
         suspend fun setUserStatus(
             admno: String,
-            allow: Boolean,
+            action: UserAction,
         ): AdminUser? {
             val client = api ?: return null
             val auth = authHeader() ?: return null
-            return if (allow) client.allow(admno, auth) else client.kick(admno, auth)
+            return when (action) {
+                UserAction.ALLOW -> client.allow(admno, auth)
+                UserAction.KICK -> client.kick(admno, auth)
+                UserAction.BAN -> client.ban(admno, auth)
+            }
+        }
+
+        suspend fun approveAll(): Int? {
+            val client = api ?: return null
+            val auth = authHeader() ?: return null
+            return client.approveAll(auth).approved
+        }
+
+        suspend fun getHealth(): HealthResponse? {
+            val client = api ?: return null
+            val auth = authHeader() ?: return null
+            return client.health(auth)
+        }
+
+        // Fire-and-forget usage report. No session token yet (governance disabled or first launch) → silently skip.
+        @Suppress("TooGenericExceptionCaught")
+        suspend fun logEvents(events: List<UsageEvent>) {
+            val client = api ?: return
+            val auth = authHeader() ?: return
+            if (events.isEmpty()) return
+            runCatching { client.events(auth, EventsRequest(events)) }
+                .onFailure { Log.w("AxisSession", "usage report failed", it) }
+        }
+
+        // ---- Admin-only remote config (force-update floor, latest build, kill-switch) --------------------
+
+        suspend fun getConfig(): RemoteConfig? {
+            val client = api ?: return null
+            val auth = authHeader() ?: return null
+            return client.getConfig(auth)
+        }
+
+        suspend fun putConfig(patch: ConfigPatch): RemoteConfig? {
+            val client = api ?: return null
+            val auth = authHeader() ?: return null
+            return client.putConfig(auth, patch)
         }
 
         private fun publish(session: AxisSession) {

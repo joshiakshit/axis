@@ -1,91 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Env } from "../src/config";
 import { IcloudClaims } from "../src/session";
-import { UserRow, listUsers, setStatus, upsertOnSession } from "../src/users";
-
-// Minimal in-memory stand-in for the exact D1 statements users.ts issues, so the governance state machine
-// can be tested without a live database.
-class FakeD1 {
-  rows = new Map<string, UserRow>();
-
-  prepare(sql: string) {
-    return new FakeStatement(this, sql);
-  }
-
-  exec(sql: string, args: unknown[]): { first: unknown; all: unknown[] } {
-    if (sql.startsWith("SELECT") && sql.includes("WHERE admno = ?")) {
-      return { first: this.rows.get(String(args[0])) ?? null, all: [] };
-    }
-    if (sql.startsWith("SELECT") && sql.includes("ORDER BY")) {
-      const all = [...this.rows.values()].sort((a, b) => {
-        const ap = a.status === "pending" ? 1 : 0;
-        const bp = b.status === "pending" ? 1 : 0;
-        if (ap !== bp) return bp - ap;
-        return a.last_seen_at < b.last_seen_at ? 1 : -1;
-      });
-      return { first: null, all };
-    }
-    if (sql.startsWith("INSERT INTO users")) {
-      const [admno, name, email, status, role, created_at, last_seen_at] = args as string[];
-      this.rows.set(admno, {
-        admno,
-        name,
-        email,
-        status: status as UserRow["status"],
-        role: role as UserRow["role"],
-        created_at,
-        last_seen_at,
-      });
-      return { first: null, all: [] };
-    }
-    if (sql.startsWith("UPDATE users SET name")) {
-      const [name, email, role, status, last_seen_at, admno] = args as string[];
-      const row = this.rows.get(admno);
-      if (row) {
-        this.rows.set(admno, {
-          ...row,
-          name,
-          email,
-          role: role as UserRow["role"],
-          status: status as UserRow["status"],
-          last_seen_at,
-        });
-      }
-      return { first: null, all: [] };
-    }
-    if (sql.startsWith("UPDATE users SET status")) {
-      const [status, admno] = args as string[];
-      const row = this.rows.get(admno);
-      if (row) this.rows.set(admno, { ...row, status: status as UserRow["status"] });
-      return { first: null, all: [] };
-    }
-    throw new Error(`unhandled sql: ${sql}`);
-  }
-}
-
-class FakeStatement {
-  constructor(
-    private db: FakeD1,
-    private sql: string,
-    private args: unknown[] = [],
-  ) {}
-
-  bind(...values: unknown[]) {
-    return new FakeStatement(this.db, this.sql, values);
-  }
-
-  async first<T>(): Promise<T | null> {
-    return this.db.exec(this.sql, this.args).first as T | null;
-  }
-
-  async all<T>(): Promise<{ results: T[] }> {
-    return { results: this.db.exec(this.sql, this.args).all as T[] };
-  }
-
-  async run(): Promise<void> {
-    this.db.exec(this.sql, this.args);
-  }
-}
+import { approveAllPending, bumpMetrics, getMetrics, listUsers, setStatus, upsertOnSession } from "../src/users";
+import { FakeD1 } from "./fakes";
 
 function env(): Env {
   return { DB: new FakeD1() } as unknown as Env;
@@ -126,6 +43,16 @@ describe("upsertOnSession", () => {
     expect(second.status).toBe("pending");
     expect(second.last_seen_at >= first.last_seen_at).toBe(true);
   });
+
+  it("counts launches and records the latest telemetry", async () => {
+    const e = env();
+    const meta = { appVersionName: "1.2.0", appVersionCode: 5, deviceModel: "SM-A156E", androidSdk: 34 };
+    const first = await upsertOnSession(e, claims("21008"), false, false, meta);
+    expect(first).toMatchObject({ session_count: 1, app_version_code: 5, device_model: "SM-A156E" });
+    const second = await upsertOnSession(e, claims("21008"), false, false, { ...meta, appVersionCode: 6 });
+    expect(second.session_count).toBe(2);
+    expect(second.app_version_code).toBe(6);
+  });
 });
 
 describe("setStatus and listUsers", () => {
@@ -143,5 +70,40 @@ describe("setStatus and listUsers", () => {
     await upsertOnSession(e, claims("21007"), false, false); // pending
     const users = await listUsers(e);
     expect(users[0].status).toBe("pending");
+  });
+
+  it("stamps approved_at only on the first approval", async () => {
+    const e = env();
+    await upsertOnSession(e, claims("21010"), false, false);
+    const approved = await setStatus(e, "21010", "approved");
+    expect(approved?.approved_at).not.toBe("");
+    const kicked = await setStatus(e, "21010", "pending");
+    expect(kicked?.approved_at).toBe(approved?.approved_at); // preserved, not cleared
+  });
+
+  it("keeps a banned user banned across re-logins (unlike a kick)", async () => {
+    const e = env();
+    await upsertOnSession(e, claims("21011"), false, true); // approved
+    await setStatus(e, "21011", "banned");
+    const relogin = await upsertOnSession(e, claims("21011"), false, true); // even with auto-approve on
+    expect(relogin.status).toBe("banned");
+  });
+
+  it("approveAllPending flips every pending user", async () => {
+    const e = env();
+    await upsertOnSession(e, claims("21012"), false, false);
+    await upsertOnSession(e, claims("21013"), false, false);
+    await upsertOnSession(e, claims("21014"), true, false); // admin, already approved
+    expect(await approveAllPending(e)).toBe(2);
+    expect((await listUsers(e)).every((u) => u.status !== "pending")).toBe(true);
+  });
+});
+
+describe("metrics", () => {
+  it("bumps and reads aggregate counters", async () => {
+    const e = env();
+    await bumpMetrics(e, [{ name: "qr_scan", count: 1 }, { name: "export_pdf", count: 2 }]);
+    await bumpMetrics(e, [{ name: "qr_scan", count: 3 }]);
+    expect(await getMetrics(e)).toEqual({ qr_scan: 4, export_pdf: 2 });
   });
 });

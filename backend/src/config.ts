@@ -24,6 +24,10 @@ export interface RemoteConfig {
   killSwitch: boolean;
   /** Optional user-facing notice (kill-switch reason, maintenance banner, …). */
   message: string;
+  /** Non-blocking in-app banner shown to everyone until dismissed. Empty = no banner. */
+  notice: string;
+  /** Comma-separated admno prefixes that auto-approve on first sight (e.g. "024GUSCSE"). Empty = off. */
+  autoApprovePrefix: string;
   /** Stamped server-side on every write. */
   updatedAt: string;
 }
@@ -33,6 +37,8 @@ export interface Env {
   CONFIG: KVNamespace;
   /** User-governance store (see migrations/). */
   DB: D1Database;
+  /** Optional APK store for self-hosted one-tap updates. Undefined until an R2 bucket is bound (see README). */
+  APK?: R2Bucket;
   /** Fallback appVersion when KV is empty. */
   DEFAULT_APP_VERSION?: string;
   /** Default tenant key when `?tenant=` is omitted. */
@@ -63,6 +69,8 @@ export function defaultConfig(env: Env): RemoteConfig {
     updateUrl: "",
     killSwitch: false,
     message: "",
+    notice: "",
+    autoApprovePrefix: "",
     updatedAt: EPOCH,
   };
   const seed = env.DEFAULT_AUTH_TOKEN?.trim();
@@ -147,6 +155,14 @@ export function applyPatch(
   if ("message" in p) {
     if (typeof p.message === "string") next.message = p.message;
     else errors.push("message must be a string");
+  }
+  if ("notice" in p) {
+    if (typeof p.notice === "string") next.notice = p.notice;
+    else errors.push("notice must be a string");
+  }
+  if ("autoApprovePrefix" in p) {
+    if (typeof p.autoApprovePrefix === "string") next.autoApprovePrefix = p.autoApprovePrefix;
+    else errors.push("autoApprovePrefix must be a string");
   }
 
   if (errors.length === 0) next.updatedAt = new Date().toISOString();

@@ -1,0 +1,17 @@
+# Baseline profile for Axis. AGP compiles this into assets/dexopt/baseline.prof and profileinstaller applies
+# it on first launch, so the hot startup + scrolling paths are AOT-compiled instead of JIT-warmed — the main
+# lever for first-run smoothness. Broad wildcard rules (H=hot, S=startup, P=post-startup) cover the app and
+# the Compose/coroutines runtime it leans on. Regenerate a precise, trace-driven profile later via a
+# macrobenchmark module for the last few percent.
+HSPLcom/ash/axis/**->**(**)**
+HSPLcom/ash/core/**->**(**)**
+HSPLandroidx/compose/runtime/**->**(**)**
+HSPLandroidx/compose/ui/**->**(**)**
+HSPLandroidx/compose/foundation/**->**(**)**
+HSPLandroidx/compose/foundation/lazy/**->**(**)**
+HSPLandroidx/compose/animation/**->**(**)**
+HSPLandroidx/compose/material3/**->**(**)**
+HSPLandroidx/navigation/**->**(**)**
+HSPLandroidx/lifecycle/**->**(**)**
+HSPLkotlinx/coroutines/**->**(**)**
+HSPLkotlin/collections/**->**(**)**

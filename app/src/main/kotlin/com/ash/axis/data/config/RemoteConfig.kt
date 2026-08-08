@@ -18,6 +18,10 @@ data class RemoteConfig(
     // Hard stop: when true the app shows `message` and blocks use.
     val killSwitch: Boolean = false,
     val message: String = "",
+    // Non-blocking in-app banner shown until dismissed. Blank = no banner.
+    val notice: String = "",
+    // Comma-separated admno prefixes that auto-approve on first sight. Blank = off.
+    val autoApprovePrefix: String = "",
     val updatedAt: String = "",
 ) {
     companion object {

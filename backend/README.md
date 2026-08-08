@@ -42,11 +42,25 @@ Config is stored per tenant in KV under `config:<tenant>`; add `?tenant=gu` to t
 | GET    | `/v1/config`    | `x-axis-key` *(only if set)*      | fetch config                     |
 | PUT    | `/v1/config`    | `Authorization: Bearer <ADMIN>`   | merge a partial config and save  |
 | POST   | `/v1/session`   | iCloudEMS token in body           | register/refresh a user, get status + role |
-| GET    | `/v1/admin/users` | `Bearer <Axis session, admin>`  | list governed users              |
-| POST   | `/v1/admin/users/:admno/allow` \| `/kick` | `Bearer <Axis session, admin>` | approve / revoke a user |
+| POST   | `/v1/events`    | `Bearer <any Axis session>`       | bump aggregate usage counters    |
+| GET    | `/v1/admin/users` | `Bearer <Axis session, admin>`  | list governed users (with usage) |
+| POST   | `/v1/admin/users/:admno/allow` \| `/kick` \| `/ban` | `Bearer <Axis session, admin>` | approve / revoke / hard-block a user |
+| POST   | `/v1/admin/approve-all` | `Bearer <Axis session, admin>` | approve every pending user    |
+| GET    | `/v1/admin/health` | `Bearer <Axis session, admin>` | counts, event metrics, APK status |
+| GET    | `/v1/admin/config` | `Bearer <Axis session, admin>` | read config from the Admin page   |
+| PUT    | `/v1/admin/config` | `Bearer <Axis session, admin>` | edit config from the Admin page (force-update, kill-switch, …) |
+| GET    | `/v1/apk`       | `x-axis-key` *(only if set)*      | download the latest APK *(R2 only)* |
+| PUT    | `/v1/admin/apk` | `Bearer <admin session or ADMIN>` | upload a new APK *(R2 only)*      |
+
+**allow / kick / ban:** *allow* → approved; *kick* → pending (a re-login re-requests approval); *ban* → banned
+(a hard block that survives re-login). Admins can't be kicked or banned. Config also carries a `notice`
+(non-blocking in-app banner) and `autoApprovePrefix` (comma-separated admno prefixes that auto-approve on first
+sight — a middle ground between approve-each and full `OPEN_ENROLLMENT`).
 
 `PUT` is a **merge**: send only the keys you want to change. `authToken: null` (or `""`) clears the override.
-See [User governance](#user-governance-approve--kick) below for the session/admin flow.
+There are two ways to edit config: `PUT /v1/config` with the deploy-time `ADMIN_TOKEN` (CLI/CI), or
+`PUT /v1/admin/config` with an **admin Axis session** — that's what the app's Admin page uses, so the owner
+sets the force-update floor from their phone. See [User governance](#user-governance-approve--kick) below.
 
 ## First-time setup
 
@@ -62,7 +76,7 @@ npx wrangler kv namespace create CONFIG
 
 # 3. Create the D1 database, then paste the printed database_id into wrangler.toml (d1_databases.database_id)
 npx wrangler d1 create axis
-npx wrangler d1 migrations apply axis --remote   # creates the users table in the deployed DB
+npx wrangler d1 migrations apply axis --remote   # applies all migrations (users table + usage columns)
 
 # 4. Set secrets (prompts for the value; never commit these)
 npx wrangler secret put ADMIN_TOKEN          # long random string — required to write config
@@ -135,11 +149,40 @@ kicked. **Rollout:** flipping this on makes existing users `pending` — set `OP
 **Limits:** enforcement is app-side (a modified APK or direct iCloudEMS use bypasses it), and light validation
 is spoofable by a hand-crafted token — acceptable for a student app, hardenable later with a server-side probe.
 
+**Usage telemetry.** Each `POST /v1/session` also reports the caller's app version, device model, Android SDK,
+and bumps a launch counter. `GET /v1/admin/users` returns these so the Admin page can show who runs which build
+(which drives the force-update decision), on what device, and how active they are.
+
+## One-tap updates (optional, self-hosted APK)
+
+The app can download and install a new APK in place (system installer, no browser). It just needs a direct
+`.apk` link in `updateUrl` — host it **anywhere** (GitHub Releases, any static host), or serve it straight from
+this Worker via R2:
+
+```bash
+# Enable R2 once, create the bucket, and uncomment the [[r2_buckets]] block in wrangler.toml
+npx wrangler r2 bucket create axis-apk
+npm run deploy
+
+# Upload a freshly built, signed release APK (admno-less CI auth via ADMIN_TOKEN)
+curl -X PUT "https://…/v1/admin/apk?versionCode=2&versionName=1.1.0" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  --data-binary @app-release.apk
+
+# Point the app at it, and advertise the new build
+curl -X PUT https://…/v1/config -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -d '{"updateUrl":"https://…/v1/apk","latestVersionCode":2,"latestVersionName":"1.1.0"}'
+```
+
+Then `latestVersionCode > installed` shows a dismissible "Update" prompt; raising `minSupportedVersionCode`
+forces it. Until an R2 bucket is bound the `/v1/apk` routes return `503` (the Worker still deploys fine).
+**Auto-updates require every distributed APK to be signed with the same key** — a signature mismatch is rejected.
+
 ## Local development
 
 ```bash
 cp .dev.vars.example .dev.vars                        # fill in ADMIN_TOKEN, SESSION_SECRET, ADMIN_ADMNOS
-npx wrangler d1 execute axis --local --file=./migrations/0001_users.sql   # seed the local users table
+npx wrangler d1 migrations apply axis --local         # apply all migrations to the local users table
 npm run dev                                           # wrangler dev with simulated local KV + D1
 npm run typecheck                                     # tsc --noEmit
 npm test                                              # vitest — config + session + governance logic

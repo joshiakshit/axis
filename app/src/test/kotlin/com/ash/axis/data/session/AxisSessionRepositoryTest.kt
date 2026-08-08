@@ -1,6 +1,7 @@
 package com.ash.axis.data.session
 
 import com.ash.axis.data.api.AxisBackendApi
+import com.ash.axis.data.config.RemoteConfig
 import com.ash.core.security.TokenManager
 import com.ash.core.storage.PreferencesStore
 import io.mockk.Runs
@@ -56,7 +57,7 @@ class AxisSessionRepositoryTest {
             val api = mockk<AxisBackendApi>()
             every { tokenManager.getAccessToken() } returns "icloud-token"
             coEvery { prefs.putUserString(KEY, any()) } just Runs
-            coEvery { api.session(SessionRequest("icloud-token")) } returns
+            coEvery { api.session(any()) } returns
                 AxisSession(status = "approved", role = "admin", admno = "21000", sessionToken = "sess-tok")
             coEvery { api.listUsers("Bearer sess-tok") } returns UsersResponse(listOf(AdminUser("21001")))
             val r = repo(api)
@@ -68,6 +69,22 @@ class AxisSessionRepositoryTest {
             coVerify { prefs.putUserString(KEY, any()) }
             // The admin session token was captured, so authorized calls succeed.
             assertEquals("21001", r.listUsers().single().admno)
+        }
+
+    @Test
+    fun `putConfig sends the patch with the admin bearer`() =
+        runTest {
+            val api = mockk<AxisBackendApi>()
+            every { tokenManager.getAccessToken() } returns "icloud-token"
+            coEvery { prefs.putUserString(KEY, any()) } just Runs
+            coEvery { api.session(any()) } returns AxisSession(status = "approved", role = "admin", sessionToken = "sess-tok")
+            val patch = ConfigPatch(minSupportedVersionCode = 12)
+            coEvery { api.putConfig("Bearer sess-tok", patch) } returns RemoteConfig(minSupportedVersionCode = 12)
+            val r = repo(api)
+            r.refresh()
+
+            assertEquals(12, r.putConfig(patch)?.minSupportedVersionCode)
+            coVerify { api.putConfig("Bearer sess-tok", patch) }
         }
 
     @Test
@@ -106,10 +123,12 @@ class AxisSessionRepositoryTest {
             coEvery { api.session(any()) } returns AxisSession(status = "approved", role = "admin", sessionToken = "sess-tok")
             coEvery { api.allow("21001", "Bearer sess-tok") } returns AdminUser("21001", status = "approved")
             coEvery { api.kick("21001", "Bearer sess-tok") } returns AdminUser("21001", status = "pending")
+            coEvery { api.ban("21001", "Bearer sess-tok") } returns AdminUser("21001", status = "banned")
             val r = repo(api)
             r.refresh()
 
-            assertEquals("approved", r.setUserStatus("21001", allow = true)?.status)
-            assertEquals("pending", r.setUserStatus("21001", allow = false)?.status)
+            assertEquals("approved", r.setUserStatus("21001", UserAction.ALLOW)?.status)
+            assertEquals("pending", r.setUserStatus("21001", UserAction.KICK)?.status)
+            assertEquals("banned", r.setUserStatus("21001", UserAction.BAN)?.status)
         }
 }

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
+import com.ash.axis.data.session.UsageReporter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,6 +26,7 @@ class QrScanViewModel
     constructor(
         private val attendanceRepo: AttendanceRepository,
         private val authRepository: AuthRepository,
+        private val usageReporter: UsageReporter,
     ) : ViewModel() {
         private val _state = MutableStateFlow(QrScanUiState())
         val state: StateFlow<QrScanUiState> = _state.asStateFlow()
@@ -65,6 +67,7 @@ class QrScanViewModel
                             userSelfie = userSelfie,
                             clientId = user.clientId,
                         )
+                    usageReporter.log(if (result.success == true) UsageReporter.QR_SCAN else UsageReporter.QR_FAIL)
                     _state.update {
                         it.copy(
                             isSubmitting = false,
@@ -73,6 +76,7 @@ class QrScanViewModel
                         )
                     }
                 } catch (e: Exception) {
+                    usageReporter.log(UsageReporter.QR_FAIL)
                     _state.update {
                         it.copy(
                             isSubmitting = false,
