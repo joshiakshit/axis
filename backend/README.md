@@ -41,8 +41,12 @@ Config is stored per tenant in KV under `config:<tenant>`; add `?tenant=gu` to t
 | GET    | `/healthz`      | none                              | liveness probe                   |
 | GET    | `/v1/config`    | `x-axis-key` *(only if set)*      | fetch config                     |
 | PUT    | `/v1/config`    | `Authorization: Bearer <ADMIN>`   | merge a partial config and save  |
+| POST   | `/v1/session`   | iCloudEMS token in body           | register/refresh a user, get status + role |
+| GET    | `/v1/admin/users` | `Bearer <Axis session, admin>`  | list governed users              |
+| POST   | `/v1/admin/users/:admno/allow` \| `/kick` | `Bearer <Axis session, admin>` | approve / revoke a user |
 
 `PUT` is a **merge**: send only the keys you want to change. `authToken: null` (or `""`) clears the override.
+See [User governance](#user-governance-approve--kick) below for the session/admin flow.
 
 ## First-time setup
 
@@ -56,12 +60,18 @@ npx wrangler login
 # 2. Create the KV namespace, then paste the printed id into wrangler.toml (kv_namespaces.id)
 npx wrangler kv namespace create CONFIG
 
-# 3. Set secrets (prompts for the value; never commit these)
+# 3. Create the D1 database, then paste the printed database_id into wrangler.toml (d1_databases.database_id)
+npx wrangler d1 create axis
+npx wrangler d1 migrations apply axis --remote   # creates the users table in the deployed DB
+
+# 4. Set secrets (prompts for the value; never commit these)
 npx wrangler secret put ADMIN_TOKEN          # long random string — required to write config
+npx wrangler secret put SESSION_SECRET       # long random string — signs Axis session tokens
+npx wrangler secret put ADMIN_ADMNOS         # your admno(s), comma-separated — the owner/admin
 npx wrangler secret put DEFAULT_AUTH_TOKEN   # optional: seed the iCloudEMS bearer
 npx wrangler secret put APP_ACCESS_KEY       # optional: soft-gate GET with an x-axis-key header
 
-# 4. Ship it
+# 5. Ship it
 npm run deploy
 ```
 
@@ -90,22 +100,61 @@ curl -X PUT …/v1/config -H "Authorization: Bearer $ADMIN_TOKEN" \
   -d '{"minSupportedVersionCode": 5, "updateUrl": "https://…"}'
 ```
 
+## User governance (approve / kick)
+
+Controls **who may use your Axis distribution**. iCloudEMS stays the identity provider (it proves a caller is
+really student `admno`); this backend is the *authorization authority* (pending / approved, user / admin).
+
+Flow: after iCloudEMS login the app calls `POST /v1/session` with its iCloudEMS access token. The Worker reads
+the `admno` from that token (light validation — decode + expiry, no signature check), upserts the user, and:
+
+- a **new** admno → `pending` (unless `OPEN_ENROLLMENT="true"`, or it's an owner in `ADMIN_ADMNOS`);
+- **`approved`** → returns a short-lived **Axis session token** (`sessionToken`) carrying `admno` + `role`;
+- an **owner** (`ADMIN_ADMNOS`) → always `approved` + `admin`.
+
+```jsonc
+// POST /v1/session   { "token": "<iCloudEMS access token>" }
+{ "status": "approved", "role": "admin", "admno": "…", "name": "…", "sessionToken": "…" }
+```
+
+Admin actions use that `sessionToken` (role must be `admin`):
+
+```bash
+# List everyone (pending first)
+curl https://…/v1/admin/users -H "Authorization: Bearer $AXIS_SESSION"
+
+# Allow (approve) or Kick (revoke → back to pending)
+curl -X POST https://…/v1/admin/users/<admno>/allow -H "Authorization: Bearer $AXIS_SESSION"
+curl -X POST https://…/v1/admin/users/<admno>/kick  -H "Authorization: Bearer $AXIS_SESSION"
+```
+
+A kicked user loses access on their next launch; if they re-login they return as `pending`. Admins can't be
+kicked. **Rollout:** flipping this on makes existing users `pending` — set `OPEN_ENROLLMENT="true"` in
+`wrangler.toml` during rollout to auto-approve, then set it back to `"false"`.
+
+**Limits:** enforcement is app-side (a modified APK or direct iCloudEMS use bypasses it), and light validation
+is spoofable by a hand-crafted token — acceptable for a student app, hardenable later with a server-side probe.
+
 ## Local development
 
 ```bash
-cp .dev.vars.example .dev.vars   # fill in ADMIN_TOKEN etc.
-npm run dev                      # wrangler dev with a simulated local KV
-npm run typecheck                # tsc --noEmit
-npm test                         # vitest — pure config logic
+cp .dev.vars.example .dev.vars                        # fill in ADMIN_TOKEN, SESSION_SECRET, ADMIN_ADMNOS
+npx wrangler d1 execute axis --local --file=./migrations/0001_users.sql   # seed the local users table
+npm run dev                                           # wrangler dev with simulated local KV + D1
+npm run typecheck                                     # tsc --noEmit
+npm test                                              # vitest — config + session + governance logic
 ```
 
 ## Security notes
 
 - The `authToken` is already extractable from the APK, so serving it here is no worse — but set
   `APP_ACCESS_KEY` to stop trivial scraping of `/v1/config`.
-- Writes are disabled until `ADMIN_TOKEN` is set (`PUT` returns `503`). Keep that token out of the repo.
+- Config writes are disabled until `ADMIN_TOKEN` is set (`PUT` returns `503`); sessions/admin are disabled
+  until `SESSION_SECRET` is set. Keep both out of the repo.
+- Axis session tokens are signed HS256 with `SESSION_SECRET`; admin endpoints re-check the caller is still an
+  admin in D1 on every call.
 
 ## Next (roadmap, not built yet)
 
-Account sync across devices and Axis-user governance (approve/ban) — both need a DB (Cloudflare D1) and
-per-user auth, layered on this same Worker later.
+Cross-device account sync and push notifications (low-attendance / timetable / grades), layered on this same
+Worker later.

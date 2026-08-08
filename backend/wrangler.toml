@@ -6,16 +6,27 @@ compatibility_date = "2025-01-01"
 # then paste the printed id below. `wrangler dev` simulates KV locally, so the placeholder is fine for dev.
 [[kv_namespaces]]
 binding = "CONFIG"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "b200a28fe55042828366f54754224ef6"
+
+# User governance store. Create with:  wrangler d1 create axis
+# then paste the printed database_id below. `wrangler dev` simulates D1 locally.
+[[d1_databases]]
+binding = "DB"
+database_name = "axis"
+database_id = "d53d64f6-43c2-4e63-8b12-66ea3759c35d"
 
 [vars]
 DEFAULT_APP_VERSION = "3.0.3"
 DEFAULT_TENANT = "gu"
+# When "true", new users are auto-approved (use during rollout, then set back to "false").
+OPEN_ENROLLMENT = "false"
 
 # Secrets (never put these here — set with `wrangler secret put <NAME>`):
 #   ADMIN_TOKEN        required to write config
 #   DEFAULT_AUTH_TOKEN optional seed for the iCloudEMS bearer before first write
 #   APP_ACCESS_KEY     optional soft gate for GET /v1/config
+#   SESSION_SECRET     required: signs Axis session tokens (openssl rand -hex 32)
+#   ADMIN_ADMNOS       comma-separated owner admno(s) that get admin + auto-approval
 
 [observability]
 enabled = true

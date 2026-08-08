@@ -31,16 +31,24 @@ export interface RemoteConfig {
 /** Env vars / secrets available to the Worker (declared in wrangler.toml + `wrangler secret put`). */
 export interface Env {
   CONFIG: KVNamespace;
+  /** User-governance store (see migrations/). */
+  DB: D1Database;
   /** Fallback appVersion when KV is empty. */
   DEFAULT_APP_VERSION?: string;
   /** Default tenant key when `?tenant=` is omitted. */
   DEFAULT_TENANT?: string;
+  /** When "true", new users are auto-approved (rollout only). */
+  OPEN_ENROLLMENT?: string;
   /** Optional secret: seeds `authToken` before anything is written to KV. */
   DEFAULT_AUTH_TOKEN?: string;
   /** Secret: bearer required to write config. Writes are disabled until this is set. */
   ADMIN_TOKEN?: string;
   /** Optional secret: when set, GET /v1/config requires a matching `x-axis-key` header. */
   APP_ACCESS_KEY?: string;
+  /** Secret: signs Axis session tokens. Sessions are disabled until this is set. */
+  SESSION_SECRET?: string;
+  /** Secret: comma-separated owner admno(s) granted admin + auto-approval. */
+  ADMIN_ADMNOS?: string;
 }
 
 const EPOCH = new Date(0).toISOString();

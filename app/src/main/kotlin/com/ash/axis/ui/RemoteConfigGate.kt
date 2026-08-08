@@ -36,7 +36,7 @@ fun RemoteConfigGate(
 ) {
     val config by remoteConfig.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    val onRetry = { scope.launch { remoteConfig.refresh() }; Unit }
+    val onRetry: () -> Unit = { scope.launch { remoteConfig.refresh() } }
 
     when {
         config.killSwitch ->

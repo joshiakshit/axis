@@ -12,6 +12,8 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import com.ash.axis.data.config.RemoteConfigRepository
+import com.ash.axis.data.session.AxisSessionRepository
 import com.ash.core.storage.PreferencesStore
 import com.ash.core.ui.theme.AppTheme
 import com.ash.core.ui.theme.ColorProfiles
@@ -28,6 +30,10 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
     @Inject lateinit var preferencesStore: PreferencesStore
+
+    @Inject lateinit var remoteConfig: RemoteConfigRepository
+
+    @Inject lateinit var axisSession: AxisSessionRepository
 
     private val qrScanRequests = MutableStateFlow(0)
 
@@ -55,6 +61,12 @@ class MainActivity : FragmentActivity() {
         var startup by mutableStateOf<StartupData?>(null)
         splashScreen.setKeepOnScreenCondition { startup == null }
         lifecycleScope.launch {
+            // Load the last-known remote config from disk before first use so a rotated token/appversion is
+            // already in effect, then refresh from the backend in the background (no-op when disabled).
+            withContext(Dispatchers.IO) {
+                remoteConfig.hydrate()
+                axisSession.hydrate()
+            }
             startup =
                 withContext(Dispatchers.IO) {
                     StartupData(
@@ -68,6 +80,7 @@ class MainActivity : FragmentActivity() {
                     )
                 }
         }
+        lifecycleScope.launch { remoteConfig.refresh() }
 
         val launchedForScan = intent?.action == ACTION_SCAN_QR
 
@@ -97,11 +110,13 @@ class MainActivity : FragmentActivity() {
                 if (!splashDone) {
                     AxisSplash(onFinished = { splashDone = true })
                 } else {
-                    SessionGate(
-                        preferencesStore = preferencesStore,
-                        qrScanRequest = qrScanRequest,
-                        startRoute = startupData.startRoute,
-                    )
+                    RemoteConfigGate(remoteConfig = remoteConfig) {
+                        SessionGate(
+                            preferencesStore = preferencesStore,
+                            qrScanRequest = qrScanRequest,
+                            startRoute = startupData.startRoute,
+                        )
+                    }
                 }
             }
         }

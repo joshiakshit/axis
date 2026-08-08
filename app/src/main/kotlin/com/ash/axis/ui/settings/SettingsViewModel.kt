@@ -12,6 +12,7 @@ import com.ash.axis.data.repository.AuthRepository
 import com.ash.axis.data.repository.SELECTED_SEMESTER_CLASS_KEY
 import com.ash.axis.data.repository.SELECTED_SEMESTER_YEAR_KEY
 import com.ash.axis.data.repository.TimetableRepository
+import com.ash.axis.data.session.AxisSessionRepository
 import com.ash.axis.domain.model.SemesterOption
 import com.ash.axis.ui.ErrorText
 import com.ash.core.storage.PreferencesStore
@@ -46,6 +47,7 @@ data class SettingsUiState(
     val isExporting: Boolean = false,
     val exportMessage: String? = null,
     val deviceId: String = "",
+    val isAdmin: Boolean = false,
 )
 
 @HiltViewModel
@@ -57,6 +59,7 @@ class SettingsViewModel
         private val attendanceRepo: AttendanceRepository,
         private val timetableRepo: TimetableRepository,
         private val dataExporter: DataExporter,
+        private val axisSession: AxisSessionRepository,
         @ApplicationContext private val appContext: Context,
     ) : ViewModel() {
         private val _state = MutableStateFlow(SettingsUiState())
@@ -104,6 +107,7 @@ class SettingsViewModel
                         semesterError = semestersResult.exceptionOrNull()?.message,
                         combinedAttendance = combinedAttendance,
                         deviceId = authRepository.getOrCreateDeviceId(),
+                        isAdmin = axisSession.isAdmin(),
                     )
                 }
             }

@@ -38,23 +38,25 @@ internal fun SessionGate(
             )
         }
         // Keyed on the active account so switching recreates every screen/ViewModel with the new
-        // account's (already admno-scoped) data.
+        // account's (already admno-scoped) data. AccessGate re-checks governance for that account.
         else -> {
-            key(account.activeAdmno) {
-                MainApp(
-                    preferencesStore = preferencesStore,
-                    qrScanRequest = qrScanRequest,
-                    startRoute = startRoute,
-                    accounts =
-                        AccountUiState(
-                            account = account,
-                            canAddAccount = viewModel.canAddAccount(),
-                            onSwitch = viewModel::switchTo,
-                            onAdd = { addingAccount = true },
-                            onRemove = viewModel::remove,
-                            onActiveLoggedOut = viewModel::refresh,
-                        ),
-                )
+            AccessGate(activeAdmno = account.activeAdmno) {
+                key(account.activeAdmno) {
+                    MainApp(
+                        preferencesStore = preferencesStore,
+                        qrScanRequest = qrScanRequest,
+                        startRoute = startRoute,
+                        accounts =
+                            AccountUiState(
+                                account = account,
+                                canAddAccount = viewModel.canAddAccount(),
+                                onSwitch = viewModel::switchTo,
+                                onAdd = { addingAccount = true },
+                                onRemove = viewModel::remove,
+                                onActiveLoggedOut = viewModel::refresh,
+                            ),
+                    )
+                }
             }
         }
     }

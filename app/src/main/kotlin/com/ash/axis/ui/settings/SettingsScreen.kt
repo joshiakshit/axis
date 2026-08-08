@@ -84,6 +84,11 @@ fun SettingsScreen(
             )
         }
 
+        if (state.isAdmin) {
+            item { SectionLabel("ADMIN") }
+            item { AdminSettings() }
+        }
+
         item { SectionLabel("SECURITY & DATA") }
         item { SecuritySettings(state, viewModel) }
 

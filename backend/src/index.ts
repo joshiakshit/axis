@@ -10,8 +10,11 @@
 // DEFAULT_TENANT / "gu"). Everything else 404s.
 
 import { Env, RemoteConfig, applyPatch, defaultConfig, parseStored, weakEtag } from "./config";
+import { decodeIcloudToken, signSession, verifySession } from "./session";
+import { UserRow, getUser, listUsers, setStatus, upsertOnSession } from "./users";
 
 const MAX_BODY_BYTES = 16 * 1024;
+const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days; user access is re-checked on each app launch anyway.
 
 const CORS_HEADERS: Record<string, string> = {
   "access-control-allow-origin": "*",
@@ -117,6 +120,73 @@ async function handlePutConfig(request: Request, env: Env, url: URL): Promise<Re
   return json(next, { status: 200 });
 }
 
+// ---- User governance (Axis sessions + admin) ---------------------------------------------------------
+
+async function handleSession(request: Request, env: Env): Promise<Response> {
+  if (!env.SESSION_SECRET) return error(503, "sessions are disabled: SESSION_SECRET is not configured");
+
+  const buf = await request.arrayBuffer();
+  if (buf.byteLength > MAX_BODY_BYTES) return error(413, "body too large");
+  let body: unknown;
+  try {
+    body = JSON.parse(new TextDecoder().decode(buf) || "{}");
+  } catch {
+    return error(400, "body must be valid JSON");
+  }
+  const raw = (body as { token?: unknown })?.token;
+  const claims = typeof raw === "string" ? decodeIcloudToken(raw) : null;
+  // Light validation: we only need the `admno` claim to identify the user. We deliberately do NOT reject on
+  // token expiry — the app may hold a still-usable-but-expired access token, and an expired token still
+  // proves which admno once authenticated. (Signature isn't verified either; hardenable later.)
+  if (!claims) return error(401, "invalid iCloudEMS token");
+
+  const admins = (env.ADMIN_ADMNOS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const isAdmin = admins.includes(claims.admno);
+  const openEnrollment = (env.OPEN_ENROLLMENT ?? "").toLowerCase() === "true";
+  const user = await upsertOnSession(env, claims, isAdmin, openEnrollment);
+
+  const sessionToken =
+    user.status === "approved"
+      ? await signSession(user.admno, user.role, env.SESSION_SECRET, SESSION_TTL_SECONDS)
+      : undefined;
+  return json({ status: user.status, role: user.role, admno: user.admno, name: user.name, sessionToken });
+}
+
+async function requireAdminSession(request: Request, env: Env): Promise<Response | null> {
+  if (!env.SESSION_SECRET) return error(503, "sessions are disabled: SESSION_SECRET is not configured");
+  const header = request.headers.get("authorization") ?? "";
+  const token = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+  const claims = token ? await verifySession(token, env.SESSION_SECRET) : null;
+  if (!claims || claims.role !== "admin") return error(401, "admin session required");
+  // Defense in depth: the caller must still be an admin in the store.
+  const user = await getUser(env, claims.admno);
+  if (!user || user.role !== "admin") return error(403, "not an admin");
+  return null;
+}
+
+async function handleListUsers(request: Request, env: Env): Promise<Response> {
+  const denied = await requireAdminSession(request, env);
+  if (denied) return denied;
+  return json({ users: await listUsers(env) });
+}
+
+async function handleUserAction(
+  request: Request,
+  env: Env,
+  admno: string,
+  action: "allow" | "kick",
+): Promise<Response> {
+  const denied = await requireAdminSession(request, env);
+  if (denied) return denied;
+  if (action === "kick") {
+    const target = await getUser(env, admno);
+    if (target?.role === "admin") return error(403, "cannot kick an admin");
+  }
+  const updated: UserRow | null = await setStatus(env, admno, action === "allow" ? "approved" : "pending");
+  if (!updated) return error(404, "user not found");
+  return json(updated);
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -131,6 +201,16 @@ export default {
       if (request.method === "GET") return handleGetConfig(request, env, url);
       if (request.method === "PUT") return handlePutConfig(request, env, url);
       return error(405, "method not allowed");
+    }
+    if (url.pathname === "/v1/session" && request.method === "POST") {
+      return handleSession(request, env);
+    }
+    if (url.pathname === "/v1/admin/users" && request.method === "GET") {
+      return handleListUsers(request, env);
+    }
+    const action = url.pathname.match(/^\/v1\/admin\/users\/([^/]+)\/(allow|kick)$/);
+    if (action && request.method === "POST") {
+      return handleUserAction(request, env, decodeURIComponent(action[1]), action[2] as "allow" | "kick");
     }
     return error(404, "not found");
   },

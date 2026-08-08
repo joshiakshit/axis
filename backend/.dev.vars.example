@@ -9,3 +9,9 @@ DEFAULT_AUTH_TOKEN=
 
 # Optional: when set, GET /v1/config requires a matching `x-axis-key` header.
 APP_ACCESS_KEY=
+
+# Required for user governance (POST /v1/session + admin endpoints). Long random string.
+SESSION_SECRET=change-me-to-another-long-random-secret
+
+# Comma-separated owner admno(s) that get admin role + auto-approval.
+ADMIN_ADMNOS=

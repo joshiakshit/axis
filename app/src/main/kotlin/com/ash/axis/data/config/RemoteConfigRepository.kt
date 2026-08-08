@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -31,8 +32,7 @@ class RemoteConfigRepository
 
         // Effective iCloudEMS bearer: the server override when present, otherwise the caller's fallback
         // (the app's compiled-in BuildConfig token).
-        fun effectiveAuthToken(fallback: String): String =
-            current.authToken?.takeIf { it.isNotBlank() } ?: fallback
+        fun effectiveAuthToken(fallback: String): String = current.authToken?.takeIf { it.isNotBlank() } ?: fallback
 
         fun appVersion(): String = current.appVersion.ifBlank { RemoteConfig.DEFAULT_APP_VERSION }
 

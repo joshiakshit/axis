@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.ash.axis.BuildConfig
 import com.ash.axis.data.api.AuthApi
+import com.ash.axis.data.api.AxisBackendApi
 import com.ash.axis.data.api.ICloudEmsApi
 import com.ash.axis.data.api.QrAttendanceApi
 import com.ash.axis.data.api.RemoteConfigApi
@@ -56,6 +57,25 @@ object AppModule {
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
             .create(RemoteConfigApi::class.java)
+    }
+
+    // Same URL/gate as the config API — null when REMOTE_CONFIG_URL is blank, which disables governance
+    // (AxisSessionRepository then no-ops and the app runs ungoverned).
+    @Provides
+    @Singleton
+    fun provideAxisBackendApi(
+        client: OkHttpClient,
+        json: Json,
+    ): AxisBackendApi? {
+        val base = BuildConfig.REMOTE_CONFIG_URL
+        if (base.isBlank()) return null
+        val normalized = if (base.endsWith("/")) base else "$base/"
+        return Retrofit.Builder()
+            .baseUrl(normalized)
+            .client(client)
+            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .build()
+            .create(AxisBackendApi::class.java)
     }
 
     @Provides
