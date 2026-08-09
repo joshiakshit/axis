@@ -9,6 +9,14 @@
 Axis is a rebranded, ground-up rebuild of the student experience on top of the university's iCloudEMS
 system — attendance, timetable, grades, and QR attendance in one clean, offline-friendly app.
 
+![Platform](https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white)
+![Kotlin](https://img.shields.io/badge/Kotlin-2.1-7F52FF?logo=kotlin&logoColor=white)
+![Compose](https://img.shields.io/badge/Jetpack%20Compose-UI-4285F4?logo=jetpackcompose&logoColor=white)
+![minSdk](https://img.shields.io/badge/minSdk-26-blue)
+![Backend](https://img.shields.io/badge/backend-Cloudflare%20Workers-F38020?logo=cloudflare&logoColor=white)
+
+**[Features](#features) · [Architecture](#architecture) · [Building](#building) · [Admin](#admin--governance)**
+
 </div>
 
 ---
