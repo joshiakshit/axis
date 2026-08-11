@@ -1,0 +1,5 @@
+instructions to build and run this project:
+
+./gradlew :app:assembleDebug
+
+cd backend && npm install

@@ -11,6 +11,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ash.axis.domain.usecase.AttendanceTone
 import com.ash.axis.ui.AppFooter
@@ -26,6 +28,11 @@ fun DashboardScreen(
     viewModel: DashboardViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+
+    // Re-read the shared cache whenever Home comes back to the foreground, so a refresh done on the Attendance
+    // tab (or a QR mark) shows here instead of a stale snapshot. The ViewModel coalesces this with its initial
+    // load, so the first launch doesn't double-fetch.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.syncFromCache() }
 
     val result: Result<DashboardUiState> =
         when {

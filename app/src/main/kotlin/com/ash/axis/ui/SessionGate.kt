@@ -40,7 +40,11 @@ internal fun SessionGate(
         // Keyed on the active account so switching recreates every screen/ViewModel with the new
         // account's (already admno-scoped) data. AccessGate re-checks governance for that account.
         else -> {
-            AccessGate(activeAdmno = account.activeAdmno) {
+            AccessGate(
+                activeAdmno = account.activeAdmno,
+                accounts = account.accounts,
+                onSwitch = viewModel::switchTo,
+            ) {
                 key(account.activeAdmno) {
                     MainApp(
                         preferencesStore = preferencesStore,

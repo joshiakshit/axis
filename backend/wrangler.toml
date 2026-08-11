@@ -16,12 +16,11 @@ binding = "DB"
 database_name = "axis"
 database_id = "d53d64f6-43c2-4e63-8b12-66ea3759c35d"
 
-# Optional: self-hosted one-tap updates. Enable R2, then:  wrangler r2 bucket create axis-apk
-# and uncomment this block. Until then the /v1/apk endpoints 503 and you can host the APK anywhere
-# (set updateUrl to any direct .apk link). `wrangler dev` simulates R2 locally.
-# [[r2_buckets]]
-# binding = "APK"
-# bucket_name = "axis-apk"
+# Self-hosted one-tap updates: the release APK lives here and is served at GET /v1/apk.
+# `wrangler dev` simulates R2 locally.
+[[r2_buckets]]
+binding = "APK"
+bucket_name = "axis-apk"
 
 [vars]
 DEFAULT_APP_VERSION = "3.0.3"

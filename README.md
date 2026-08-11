@@ -130,6 +130,24 @@ keytool -genkeypair -v -keystore ~/axis-release.jks -alias axis -keyalg RSA -key
 ```
 Fill the `RELEASE_*` properties above with the keystore/key details, then `./gradlew :app:assembleRelease`.
 
+### Cutting a release (automated)
+
+The version is single-sourced in [`version.properties`](version.properties) and shipped end-to-end by one
+script — no manual version editing, hosting, or config changes:
+
+```bash
+scripts/release.sh              # bump patch (1.0.0 → 1.0.1), build, upload, advertise as latest
+scripts/release.sh 1.2.0        # explicit version name
+scripts/release.sh --force      # ALSO raise the force-update floor (blocks older builds)
+scripts/release.sh --check      # run the test/lint gate first
+```
+
+It bumps `version.properties`, builds the signed APK, uploads it to the Worker's R2 store
+(`PUT /v1/admin/apk`), and points remote config at it (`updateUrl` + `latestVersionCode`) so every installed
+app offers the update. Prerequisites: `REMOTE_CONFIG_URL` and `ADMIN_TOKEN` in `local.properties`, the
+`RELEASE_*` signing keys, and an **R2 bucket bound in the Worker** (see [`backend/README.md`](backend/README.md)
+→ *One-tap updates*). Commit `version.properties` afterwards so the bump is recorded.
+
 ---
 
 ## Admin & governance

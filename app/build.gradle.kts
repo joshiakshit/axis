@@ -18,6 +18,15 @@ val localProps =
     }
 val apiAuthToken = localProps.getProperty("API_AUTH_TOKEN", "")
 val remoteConfigUrl = localProps.getProperty("REMOTE_CONFIG_URL", "")
+
+// Version is single-sourced in version.properties and bumped by scripts/release.sh (never edit by hand).
+val versionProps =
+    Properties().apply {
+        val f = rootProject.file("version.properties")
+        if (f.exists()) load(f.inputStream())
+    }
+val appVersionCode = versionProps.getProperty("VERSION_CODE", "1").trim().toInt()
+val appVersionName = versionProps.getProperty("VERSION_NAME", "1.0.0").trim()
 val releaseStoreFile = localProps.getProperty("RELEASE_STORE_FILE", "")
 val releaseStorePassword = localProps.getProperty("RELEASE_STORE_PASSWORD", "")
 val releaseKeyAlias = localProps.getProperty("RELEASE_KEY_ALIAS", "")
@@ -31,8 +40,8 @@ android {
         applicationId = "com.ash.axis"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

@@ -1,7 +1,9 @@
 package com.ash.axis.ui.settings
 
 import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -9,15 +11,21 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -29,13 +37,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -43,13 +51,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ash.axis.BuildConfig
 import com.ash.axis.data.session.AdminUser
 import com.ash.axis.data.session.AxisSession
-import com.ash.axis.data.session.ConfigPatch
 import com.ash.axis.data.session.UserAction
 import java.time.LocalDate
 
-// The dedicated Admin tools page (owner-only): an at-a-glance overview + usage metrics, remote app controls
-// (force-update floor, latest build, kill-switch, notice, auto-approve — pushed live to every client), and the
-// governed user list with Allow / Kick / Ban.
+// Owner-only Admin tools. Action-first (no raw config form): pick a force-update floor from a version list,
+// broadcast a notice, kill-switch, and manage users with search/filter + a tap-through detail sheet.
 @Suppress("LongMethod")
 @Composable
 fun AdminScreen(
@@ -67,6 +73,15 @@ fun AdminScreen(
         }
     }
 
+    var query by rememberSaveable { mutableStateOf("") }
+    var filter by rememberSaveable { mutableStateOf("all") }
+    var detailUser by remember { mutableStateOf<AdminUser?>(null) }
+
+    val filtered =
+        state.users.filter { u ->
+            (filter == "all" || u.status == filter) &&
+                (query.isBlank() || u.name.contains(query, true) || u.admno.contains(query, true))
+        }
     val pendingCount = state.users.count { it.status == AxisSession.STATUS_PENDING }
 
     LazyColumn(
@@ -80,38 +95,52 @@ fun AdminScreen(
         item { SectionLabel("OVERVIEW") }
         item { AdminOverview(state) }
 
+        item { SectionLabel("FORCE UPDATE") }
+        item { ForceUpdateCard(state = state, onSet = viewModel::setMinVersion) }
+
+        item { SectionLabel("BROADCAST") }
+        item { BroadcastCard(state = state, onSend = viewModel::setNotice) }
+
+        item { SectionLabel("EMERGENCY") }
+        item { KillSwitchCard(state = state, onToggle = viewModel::setKillSwitch) }
+
         item { SectionLabel("USAGE") }
         item { UsageCard(state) }
 
-        item { SectionLabel("APP CONTROL") }
-        item { AppControlCard(state = state, onPublish = viewModel::saveConfig) }
-
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                SectionLabel("USERS")
+                SectionLabel("USERS · ${state.users.size}")
                 Spacer(Modifier.weight(1f))
                 if (pendingCount > 0) {
                     TextButton(onClick = viewModel::approveAll) { Text("Approve all ($pendingCount)") }
                 }
             }
         }
+        item { UserSearchBar(query, { query = it }, filter, { filter = it }) }
         state.error?.let { err -> item { Text(err, fontSize = 12.sp, color = MaterialTheme.colorScheme.error) } }
-        if (!state.loading && state.users.isEmpty()) {
+        if (!state.loading && filtered.isEmpty()) {
             item {
                 SettingsCard {
-                    Text("No users yet.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("No matching users.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
-        items(state.users, key = { it.admno }) { user ->
-            AdminUserCard(
-                user = user,
-                busy = state.busyAdmno == user.admno,
-                onAction = { action -> viewModel.act(user.admno, action) },
-            )
+        items(filtered, key = { it.admno }) { user ->
+            AdminUserRow(user = user, busy = state.busyAdmno == user.admno, onClick = { detailUser = user })
         }
 
         item { Spacer(Modifier.navigationBarsPadding().height(24.dp)) }
+    }
+
+    detailUser?.let { user ->
+        // Reflect live status changes (allow/kick/ban) back into the open sheet.
+        val fresh = state.users.firstOrNull { it.admno == user.admno } ?: user
+        UserDetailDialog(
+            user = fresh,
+            busy = state.busyAdmno == fresh.admno,
+            onAction = { action -> viewModel.act(fresh.admno, action) },
+            onDismiss = { detailUser = null },
+        )
     }
 }
 
@@ -138,26 +167,127 @@ private fun AdminTopBar(
 private fun AdminOverview(state: AdminUiState) {
     val users = state.users
     val h = state.health
-    val total = h?.users ?: users.size
-    val pending = h?.pending ?: users.count { it.status == AxisSession.STATUS_PENDING }
-    val approved = h?.approved ?: users.count { it.status == AxisSession.STATUS_APPROVED }
-    val banned = h?.banned ?: users.count { it.status == AxisSession.STATUS_BANNED }
     val since = LocalDate.now().minusDays(WEEK).toString()
-    val active = users.count { it.lastSeenAt.take(10) >= since }
-
     SettingsCard {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Stat("Users", total.toString())
-            Stat("Pending", pending.toString())
-            Stat("Approved", approved.toString())
-            Stat("Banned", banned.toString())
-            Stat("Active 7d", active.toString())
+            Stat("Users", (h?.users ?: users.size).toString())
+            Stat("Pending", (h?.pending ?: users.count { it.status == AxisSession.STATUS_PENDING }).toString())
+            Stat("Approved", (h?.approved ?: users.count { it.status == AxisSession.STATUS_APPROVED }).toString())
+            Stat("Banned", (h?.banned ?: users.count { it.status == AxisSession.STATUS_BANNED }).toString())
+            Stat("Active 7d", users.count { it.lastSeenAt.take(10) >= since }.toString())
         }
     }
 }
 
-// Event counters (from the backend) + a version-adoption histogram (from the user list) to guide the
-// force-update decision.
+// Pick the force-update floor from a scrollable list of real versions (latest published + whatever users run),
+// newest first — no version numbers to remember. Selecting one publishes it immediately.
+@Composable
+private fun ForceUpdateCard(
+    state: AdminUiState,
+    onSet: (Int) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val options = versionOptions(state)
+    val currentMin = state.config?.minSupportedVersionCode ?: 0
+    val currentLabel = options.firstOrNull { it.first == currentMin }?.let(::versionLabel) ?: "build $currentMin"
+
+    SettingsCard {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Minimum version", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Box {
+                OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text(currentLabel, modifier = Modifier.weight(1f))
+                    Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+                }
+                DropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false },
+                    // Cap the height to ~3 rows so a long version list scrolls inside the menu.
+                    modifier = Modifier.heightIn(max = 168.dp),
+                ) {
+                    options.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(versionLabel(option)) },
+                            trailingIcon = {
+                                if (option.first == currentMin) Icon(Icons.Filled.Check, contentDescription = "current")
+                            },
+                            onClick = {
+                                expanded = false
+                                if (option.first != currentMin) onSet(option.first)
+                            },
+                        )
+                    }
+                }
+            }
+            Text(
+                "Anyone on a build below this is blocked until they update.",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun BroadcastCard(
+    state: AdminUiState,
+    onSend: (String) -> Unit,
+) {
+    var text by rememberSaveable { mutableStateOf("") }
+    var seeded by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state.config) {
+        if (state.config != null && !seeded) {
+            text = state.config?.notice.orEmpty()
+            seeded = true
+        }
+    }
+    SettingsCard {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                label = { Text("Message shown to everyone (blank = none)") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { onSend(text) }, enabled = !state.savingConfig) { Text("Send") }
+                TextButton(onClick = {
+                    text = ""
+                    onSend("")
+                }, enabled = !state.savingConfig) { Text("Clear") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun KillSwitchCard(
+    state: AdminUiState,
+    onToggle: (Boolean, String) -> Unit,
+) {
+    var message by rememberSaveable { mutableStateOf("") }
+    var seeded by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state.config) {
+        if (state.config != null && !seeded) {
+            message = state.config?.message.orEmpty()
+            seeded = true
+        }
+    }
+    val on = state.config?.killSwitch == true
+    SettingsCard {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ToggleRow("Kill switch — block the app for everyone", on) { onToggle(it, message) }
+            OutlinedTextField(
+                value = message,
+                onValueChange = { message = it },
+                label = { Text("Reason shown while blocked") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
 @Composable
 private fun UsageCard(state: AdminUiState) {
     val metrics = state.health?.metrics.orEmpty()
@@ -184,12 +314,119 @@ private fun UsageCard(state: AdminUiState) {
             } else {
                 versions.forEach { (name, count) -> KeyValueRow("v$name", count.toString()) }
             }
-            state.health?.let {
-                Spacer(Modifier.height(6.dp))
-                KeyValueRow("APK uploaded", if (it.apkUploaded) "yes" else "no")
+        }
+    }
+}
+
+@Composable
+private fun UserSearchBar(
+    query: String,
+    onQuery: (String) -> Unit,
+    filter: String,
+    onFilter: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQuery,
+            label = { Text("Search name or admno") },
+            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("all", AxisSession.STATUS_PENDING, AxisSession.STATUS_APPROVED, AxisSession.STATUS_BANNED)
+                .forEach { f ->
+                    FilterChip(selected = filter == f, onClick = { onFilter(f) }, label = { Text(f) })
+                }
+        }
+    }
+}
+
+@Composable
+private fun AdminUserRow(
+    user: AdminUser,
+    busy: Boolean,
+    onClick: () -> Unit,
+) {
+    SettingsCard {
+        Row(
+            modifier = Modifier.fillMaxWidth().clickable(onClickLabel = "details") { onClick() },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    user.name.ifBlank { user.admno },
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(userMeta(user), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            when {
+                busy -> CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                user.role == AxisSession.ROLE_ADMIN ->
+                    Text("admin", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
+                else -> StatusPill(user.status)
             }
         }
     }
+}
+
+@Composable
+private fun StatusPill(status: String) {
+    val color =
+        when (status) {
+            AxisSession.STATUS_APPROVED -> MaterialTheme.colorScheme.primary
+            AxisSession.STATUS_BANNED -> MaterialTheme.colorScheme.error
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
+        }
+    Text(status, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = color)
+}
+
+@Composable
+private fun UserDetailDialog(
+    user: AdminUser,
+    busy: Boolean,
+    onAction: (UserAction) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(user.name.ifBlank { user.admno }) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                KeyValueRow("Admno", user.admno)
+                KeyValueRow("Status", user.status)
+                if (user.role == AxisSession.ROLE_ADMIN) KeyValueRow("Role", "admin")
+                if (user.email.isNotBlank()) KeyValueRow("Email", user.email)
+                if (user.deviceModel.isNotBlank()) KeyValueRow("Device", user.deviceModel)
+                if (user.androidSdk > 0) KeyValueRow("Android SDK", user.androidSdk.toString())
+                if (user.appVersionName.isNotBlank()) KeyValueRow("App version", "v${user.appVersionName} (${user.appVersionCode})")
+                KeyValueRow("Launches", user.sessionCount.toString())
+                if (user.firstSeenAt.isNotBlank()) KeyValueRow("Joined", user.firstSeenAt.take(10))
+                if (user.lastSeenAt.isNotBlank()) KeyValueRow("Last seen", user.lastSeenAt.take(10))
+            }
+        },
+        confirmButton = {
+            if (user.role != AxisSession.ROLE_ADMIN && !busy) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (user.status != AxisSession.STATUS_APPROVED) {
+                        TextButton(onClick = { onAction(UserAction.ALLOW) }) { Text("Allow") }
+                    }
+                    if (user.status == AxisSession.STATUS_APPROVED) {
+                        TextButton(onClick = { onAction(UserAction.KICK) }) { Text("Kick") }
+                    }
+                    if (user.status != AxisSession.STATUS_BANNED) {
+                        TextButton(onClick = { onAction(UserAction.BAN) }) {
+                            Text("Ban", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
 }
 
 @Composable
@@ -214,166 +451,34 @@ private fun Stat(
     }
 }
 
-@Suppress("LongMethod")
-@Composable
-private fun AppControlCard(
-    state: AdminUiState,
-    onPublish: (ConfigPatch) -> Unit,
-) {
-    val config = state.config
-    var minCode by rememberSaveable { mutableStateOf("") }
-    var latestCode by rememberSaveable { mutableStateOf("") }
-    var latestName by rememberSaveable { mutableStateOf("") }
-    var updateUrl by rememberSaveable { mutableStateOf("") }
-    var message by rememberSaveable { mutableStateOf("") }
-    var notice by rememberSaveable { mutableStateOf("") }
-    var autoApprovePrefix by rememberSaveable { mutableStateOf("") }
-    var killSwitch by rememberSaveable { mutableStateOf(false) }
-    var seeded by rememberSaveable { mutableStateOf(false) }
+// Build the version dropdown list: latest published + this build + everything users are running, newest first.
+private fun versionOptions(state: AdminUiState): List<Pair<Int, String>> {
+    val map = linkedMapOf<Int, String>()
 
-    LaunchedEffect(config) {
-        if (config != null && !seeded) {
-            minCode = config.minSupportedVersionCode.toString()
-            latestCode = config.latestVersionCode.toString()
-            latestName = config.latestVersionName
-            updateUrl = config.updateUrl
-            message = config.message
-            notice = config.notice
-            autoApprovePrefix = config.autoApprovePrefix
-            killSwitch = config.killSwitch
-            seeded = true
-        }
+    fun add(
+        code: Int,
+        name: String,
+    ) {
+        if (code <= 0) return
+        if (map[code].isNullOrBlank()) map[code] = name
     }
-
-    SettingsCard {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(
-                "This build: v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (config == null) {
-                Text("Loading config…", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                NumberField("Min version code (force-update floor)", minCode) { minCode = it }
-                NumberField("Latest version code", latestCode) { latestCode = it }
-                TextField("Latest version name", latestName) { latestName = it }
-                TextField("Update URL (.apk)", updateUrl) { updateUrl = it }
-                TextField("Auto-approve admno prefix (e.g. 024GUSCSE)", autoApprovePrefix) { autoApprovePrefix = it }
-                TextField("Notice banner (blank = none)", notice) { notice = it }
-                TextField("Block message (kill-switch / update screen)", message) { message = it }
-                ToggleRow("Kill switch (block the app)", killSwitch) { killSwitch = it }
-                Button(
-                    onClick = {
-                        onPublish(
-                            ConfigPatch(
-                                minSupportedVersionCode = minCode.toIntOrNull(),
-                                latestVersionCode = latestCode.toIntOrNull(),
-                                latestVersionName = latestName,
-                                updateUrl = updateUrl,
-                                killSwitch = killSwitch,
-                                message = message,
-                                notice = notice,
-                                autoApprovePrefix = autoApprovePrefix,
-                            ),
-                        )
-                    },
-                    enabled = !state.savingConfig,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(if (state.savingConfig) "Publishing…" else "Publish to all users")
-                }
-            }
-        }
+    state.config?.let {
+        add(it.latestVersionCode, it.latestVersionName)
+        add(it.minSupportedVersionCode, "")
     }
+    add(BuildConfig.VERSION_CODE, BuildConfig.VERSION_NAME)
+    state.users.forEach { add(it.appVersionCode, it.appVersionName) }
+    return map.entries.sortedByDescending { it.key }.map { it.key to it.value }
 }
 
-@Composable
-private fun TextField(
-    label: String,
-    value: String,
-    onValueChange: (String) -> Unit,
-) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        label = { Text(label) },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth(),
-    )
-}
-
-@Composable
-private fun NumberField(
-    label: String,
-    value: String,
-    onValueChange: (String) -> Unit,
-) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = { new -> onValueChange(new.filter(Char::isDigit)) },
-        label = { Text(label) },
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        modifier = Modifier.fillMaxWidth(),
-    )
-}
-
-@Composable
-private fun AdminUserCard(
-    user: AdminUser,
-    busy: Boolean,
-    onAction: (UserAction) -> Unit,
-) {
-    SettingsCard {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    user.name.ifBlank { user.admno },
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(user.admno, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(userMeta(user), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Spacer(Modifier.size(8.dp))
-            UserActions(user = user, busy = busy, onAction = onAction)
-        }
-    }
-}
-
-@Composable
-private fun UserActions(
-    user: AdminUser,
-    busy: Boolean,
-    onAction: (UserAction) -> Unit,
-) {
-    when {
-        busy -> CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-        user.role == AxisSession.ROLE_ADMIN ->
-            Text("admin", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
-        user.status == AxisSession.STATUS_BANNED ->
-            OutlinedButton(onClick = { onAction(UserAction.ALLOW) }) { Text("Unban") }
-        user.status == AxisSession.STATUS_PENDING ->
-            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                TextButton(onClick = { onAction(UserAction.ALLOW) }) { Text("Allow") }
-                TextButton(onClick = { onAction(UserAction.BAN) }) { Text("Ban", color = MaterialTheme.colorScheme.error) }
-            }
-        else ->
-            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                TextButton(onClick = { onAction(UserAction.KICK) }) { Text("Kick") }
-                TextButton(onClick = { onAction(UserAction.BAN) }) { Text("Ban", color = MaterialTheme.colorScheme.error) }
-            }
-    }
-}
+private fun versionLabel(option: Pair<Int, String>): String =
+    if (option.second.isBlank()) "build ${option.first}" else "v${option.second} (${option.first})"
 
 private fun userMeta(user: AdminUser): String {
     val parts = mutableListOf(user.status)
-    if (user.lastSeenAt.isNotBlank()) parts += "seen ${user.lastSeenAt.take(10)}"
     if (user.appVersionName.isNotBlank()) parts += "v${user.appVersionName}"
     if (user.deviceModel.isNotBlank()) parts += user.deviceModel
-    if (user.sessionCount > 0) parts += "${user.sessionCount}×"
+    if (user.lastSeenAt.isNotBlank()) parts += "seen ${user.lastSeenAt.take(10)}"
     return parts.joinToString(" · ")
 }
 

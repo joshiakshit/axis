@@ -108,4 +108,15 @@ class AdminViewModel
         }
 
         fun consumeConfigMessage() = mutableState.update { it.copy(configMessage = null) }
+
+        // --- convenience wrappers for the redesigned Admin controls -------------------------------------
+
+        fun setMinVersion(code: Int) = saveConfig(ConfigPatch(minSupportedVersionCode = code))
+
+        fun setNotice(text: String) = saveConfig(ConfigPatch(notice = text))
+
+        fun setKillSwitch(
+            on: Boolean,
+            message: String,
+        ) = saveConfig(ConfigPatch(killSwitch = on, message = message))
     }

@@ -101,6 +101,9 @@ fun SettingsScreen(
         item { SectionLabel("SECURITY & DATA") }
         item { SecuritySettings(state, viewModel) }
 
+        item { SectionLabel("UPDATES") }
+        item { UpdateSettings() }
+
         item { SectionLabel("SUPPORT & ABOUT") }
         item { SupportAboutSettings(context = context) }
 
