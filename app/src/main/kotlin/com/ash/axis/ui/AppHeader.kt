@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -32,6 +33,7 @@ import com.ash.axis.R
 @Composable
 internal fun AppHeader(
     onSettingsClick: () -> Unit,
+    onNotificationsClick: () -> Unit = {},
     accountName: String = "",
     hasMultipleAccounts: Boolean = false,
     onAccountClick: () -> Unit = {},
@@ -56,7 +58,15 @@ internal fun AppHeader(
             highlighted = hasMultipleAccounts,
             onClick = onAccountClick,
         )
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.width(2.dp))
+        IconButton(onClick = onNotificationsClick) {
+            Icon(
+                Icons.Default.Notifications,
+                contentDescription = "Notifications",
+                modifier = Modifier.size(22.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         IconButton(onClick = onSettingsClick) {
             Icon(
                 Icons.Default.Settings,

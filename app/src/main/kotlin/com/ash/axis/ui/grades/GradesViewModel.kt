@@ -46,6 +46,7 @@ class GradesViewModel
             when (_state.value.selectedTab) {
                 GradeTab.PERFORMANCE -> loadPerformance(forceRefresh = true)
                 GradeTab.RESULT -> loadSemesters(forceRefresh = true)
+                GradeTab.ADMIT_CARD -> loadAdmitCard(forceRefresh = true)
             }
         }
 
@@ -60,6 +61,11 @@ class GradesViewModel
                 GradeTab.RESULT -> {
                     if (_state.value.semesterNumbers.isEmpty()) {
                         loadSemesters(forceRefresh = false)
+                    }
+                }
+                GradeTab.ADMIT_CARD -> {
+                    if (_state.value.admitCards.isEmpty() && _state.value.admitCardError == null) {
+                        loadAdmitCard(forceRefresh = false)
                     }
                 }
             }
@@ -434,6 +440,43 @@ class GradesViewModel
                         it.copy(
                             isLoadingPdf = false,
                             error = ErrorText.forData(e),
+                        )
+                    }
+                }
+            }
+        }
+
+        @Suppress("TooGenericExceptionCaught")
+        private fun loadAdmitCard(forceRefresh: Boolean) {
+            viewModelScope.launch {
+                _state.update {
+                    it.copy(
+                        admitCardLoading = true,
+                        admitCardError = null,
+                        isRefreshing = forceRefresh && it.admitCards.isNotEmpty(),
+                    )
+                }
+                try {
+                    val user = authRepository.getUserInfo() ?: error("Not logged in")
+                    val entries = gradesRepo.getAdmitCard(
+                        admno = user.admno,
+                        brId = user.brId,
+                        forceRefresh = forceRefresh,
+                    )
+                    _state.update {
+                        it.copy(
+                            admitCardLoading = false,
+                            isRefreshing = false,
+                            admitCards = entries,
+                            admitCardError = if (entries.isEmpty()) "No admit card data available" else null,
+                        )
+                    }
+                } catch (e: Exception) {
+                    _state.update {
+                        it.copy(
+                            admitCardLoading = false,
+                            isRefreshing = false,
+                            admitCardError = ErrorText.forData(e),
                         )
                     }
                 }

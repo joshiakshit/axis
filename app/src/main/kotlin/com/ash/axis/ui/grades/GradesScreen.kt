@@ -55,6 +55,7 @@ fun GradesScreen(
     val scope = rememberCoroutineScope()
     val performanceListState = rememberLazyListState()
     val resultListState = rememberLazyListState()
+    val admitCardListState = rememberLazyListState()
 
     val currentTabFromPager by remember {
         derivedStateOf {
@@ -151,6 +152,21 @@ fun GradesScreen(
                             )
                         }
                     }
+                    GradeTab.ADMIT_CARD -> {
+                        val result: Result<GradesUiState> =
+                            when {
+                                state.admitCardLoading && state.admitCards.isEmpty() -> Result.Loading
+                                state.admitCardError != null && state.admitCards.isEmpty() ->
+                                    Result.Error(Exception(state.admitCardError), state.admitCardError)
+                                else -> Result.Success(state)
+                            }
+                        LoadingStateContainer(result = result, onRetry = viewModel::refresh) { data ->
+                            AdmitCardContent(
+                                data = data,
+                                listState = admitCardListState,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -163,7 +179,7 @@ private fun GradesTabBar(
     onTabSelected: (GradeTab) -> Unit,
 ) {
     val tabs = GradeTab.entries
-    val tabLabels = listOf("Performance", "Result")
+    val tabLabels = listOf("Performance", "Result", "Admit Card")
 
     TabRow(
         selectedTabIndex = tabs.indexOf(selectedTab),

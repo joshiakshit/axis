@@ -2,6 +2,8 @@ package com.ash.axis.ui.attendance
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.ash.axis.data.DataRefreshSignal
+import com.ash.axis.data.RefreshTrigger
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
 import com.ash.axis.data.repository.SELECTED_SEMESTER_CLASS_KEY
@@ -73,6 +75,7 @@ class AttendanceViewModel
         private val timetableUseCase: TimetableUseCase,
         private val preferencesStore: PreferencesStore,
         private val networkMonitor: NetworkMonitor,
+        private val refreshSignal: DataRefreshSignal,
     ) : ViewModel() {
         private val _state = MutableStateFlow(AttendanceUiState())
         val state: StateFlow<AttendanceUiState> = _state.asStateFlow()
@@ -80,6 +83,13 @@ class AttendanceViewModel
         init {
             load(forceRefresh = false)
             observeSemesterSelection()
+            viewModelScope.launch {
+                refreshSignal.signal.collect { trigger ->
+                    if (trigger == RefreshTrigger.ALL || trigger == RefreshTrigger.ATTENDANCE) {
+                        load(forceRefresh = false)
+                    }
+                }
+            }
         }
 
         fun refresh() = load(forceRefresh = true)
@@ -170,6 +180,7 @@ class AttendanceViewModel
                             isOffline = offline,
                         )
                     }
+                    if (forceRefresh) refreshSignal.emit(RefreshTrigger.ATTENDANCE)
                 } catch (e: Exception) {
                     _state.update { it.copy(isLoading = false, isRefreshing = false, error = ErrorText.forData(e)) }
                 }

@@ -2,6 +2,8 @@ package com.ash.axis.ui.qr
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.ash.axis.data.DataRefreshSignal
+import com.ash.axis.data.RefreshTrigger
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
 import com.ash.axis.data.session.UsageReporter
@@ -27,6 +29,7 @@ class QrScanViewModel
         private val attendanceRepo: AttendanceRepository,
         private val authRepository: AuthRepository,
         private val usageReporter: UsageReporter,
+        private val refreshSignal: DataRefreshSignal,
     ) : ViewModel() {
         private val _state = MutableStateFlow(QrScanUiState())
         val state: StateFlow<QrScanUiState> = _state.asStateFlow()
@@ -68,6 +71,9 @@ class QrScanViewModel
                             clientId = user.clientId,
                         )
                     usageReporter.log(if (result.success == true) UsageReporter.QR_SCAN else UsageReporter.QR_FAIL)
+                    if (result.success == true) {
+                        refreshSignal.emit(RefreshTrigger.ATTENDANCE)
+                    }
                     _state.update {
                         it.copy(
                             isSubmitting = false,

@@ -89,34 +89,48 @@ class TimetableRepository
             cacheStore.clear()
         }
 
+        private fun timetableBody(
+            admno: String,
+            brId: Int,
+            acadYear: String,
+            startDate: String,
+            endDate: String,
+        ) = studentApi.jsonBody(
+            "from" to "app",
+            "empid" to "",
+            "action" to "wdefault",
+            "method" to "getData",
+            "startDate" to startDate,
+            "endDate" to endDate,
+            "br_id" to brId,
+            "admno" to admno,
+            "room" to "",
+            "client" to Tenants.GU.clientCode,
+            "acadyr" to acadYear,
+        )
+
         private suspend fun fetchTimetableResponse(
             admno: String,
             brId: Int,
             acadYear: String,
             startDate: String,
             endDate: String,
-        ) = studentApi.parseStudentResponse(
-            studentApi.requireBody(
-                endpoint = "getTimetable",
-                response =
-                    run {
-                        authRepository.refreshTokenIfNeeded()
-                        api.postTimetable(
-                            studentApi.jsonBody(
-                                "from" to "app",
-                                "empid" to "",
-                                "action" to "wdefault",
-                                "method" to "getData",
-                                "startDate" to startDate,
-                                "endDate" to endDate,
-                                "br_id" to brId,
-                                "admno" to admno,
-                                "room" to "",
-                                "client" to Tenants.GU.clientCode,
-                                "acadyr" to acadYear,
-                            ),
-                        )
-                    },
-            ),
-        )
+        ): kotlinx.serialization.json.JsonElement {
+            authRepository.refreshTokenIfNeeded()
+            return try {
+                studentApi.parseStudentResponse(
+                    studentApi.requireBody(
+                        "getTimetableV1",
+                        api.postTimetableV1(timetableBody(admno, brId, acadYear, startDate, endDate)),
+                    ),
+                )
+            } catch (_: Exception) {
+                studentApi.parseStudentResponse(
+                    studentApi.requireBody(
+                        "getTimetable",
+                        api.postTimetable(timetableBody(admno, brId, acadYear, startDate, endDate)),
+                    ),
+                )
+            }
+        }
     }

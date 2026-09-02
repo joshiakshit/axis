@@ -96,3 +96,14 @@ data class PerformanceData(
     val academicYears: List<PerformanceAcadYear> = emptyList(),
     val courses: List<CourseMarks> = emptyList(),
 )
+
+@Serializable
+data class AdmitCardEntry(
+    val date: String = "",
+    val subjectName: String = "",
+    val subjectCode: String = "",
+    val fromTime: String = "",
+    val toTime: String = "",
+    val room: String = "",
+    val seat: String = "",
+)

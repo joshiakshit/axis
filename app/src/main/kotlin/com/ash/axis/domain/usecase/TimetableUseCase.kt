@@ -45,6 +45,20 @@ class TimetableUseCase
             return h * 60 + m
         }
 
+        fun formatTime12h(time: String): String {
+            if (time.isBlank()) return ""
+            val parts = time.split(":")
+            val h = parts.getOrNull(0)?.toIntOrNull() ?: return time
+            val m = parts.getOrNull(1)?.toIntOrNull() ?: 0
+            val suffix = if (h < 12) "AM" else "PM"
+            val h12 = when {
+                h == 0 -> 12
+                h > 12 -> h - 12
+                else -> h
+            }
+            return if (m == 0) "$h12 $suffix" else "$h12:${m.toString().padStart(2, '0')} $suffix"
+        }
+
         fun currentSlotProgress(
             slot: TimetableSlot,
             isToday: Boolean,

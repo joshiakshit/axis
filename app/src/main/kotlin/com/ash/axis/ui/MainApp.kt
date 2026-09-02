@@ -32,6 +32,7 @@ import com.ash.axis.ui.dashboard.DashboardScreen
 import com.ash.axis.ui.grades.GradesScreen
 import com.ash.axis.ui.qr.QrScanFlow
 import com.ash.axis.ui.qr.QrScanViewModel
+import com.ash.axis.ui.notifications.NotificationsScreen
 import com.ash.axis.ui.settings.AdminScreen
 import com.ash.axis.ui.settings.SettingsScreen
 import com.ash.axis.ui.timetable.TimetableScreen
@@ -46,7 +47,7 @@ import com.ash.core.ui.navigation.CoreNavHost
 private val tabRoutes = setOf("dashboard", "academics", "planner", "grades")
 
 // Full-screen routes pushed on top of the tabs (no bottom bar); they slide in and pop back.
-private val fullScreenRoutes = setOf("settings", "admin")
+private val fullScreenRoutes = setOf("settings", "admin", "notifications")
 
 @Suppress("LongMethod", "CyclomaticComplexMethod")
 @Composable
@@ -124,6 +125,9 @@ internal fun MainApp(
             topBar = {
                 AppHeader(
                     onSettingsClick = navigateToSettings,
+                    onNotificationsClick = {
+                        navController.navigate("notifications") { launchSingleTop = true }
+                    },
                     accountName = account.activeAccount?.name.orEmpty(),
                     hasMultipleAccounts = account.accounts.size > 1,
                     onAccountClick = { showAccountSwitcher = true },
@@ -134,7 +138,7 @@ internal fun MainApp(
                 CoreNavHost(
                     navController = navController,
                     startDestination = startRoute,
-                    slideRoutes = setOf("settings", "grades", "admin"),
+                    slideRoutes = setOf("settings", "grades", "admin", "notifications"),
                     routes =
                         mapOf(
                             "dashboard" to {
@@ -158,6 +162,12 @@ internal fun MainApp(
                             },
                             "admin" to {
                                 AdminScreen(
+                                    modifier = Modifier.padding(innerPadding),
+                                    onBack = { navController.popBackStack() },
+                                )
+                            },
+                            "notifications" to {
+                                NotificationsScreen(
                                     modifier = Modifier.padding(innerPadding),
                                     onBack = { navController.popBackStack() },
                                 )

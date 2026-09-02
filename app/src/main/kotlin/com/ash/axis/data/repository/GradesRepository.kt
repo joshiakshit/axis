@@ -3,6 +3,7 @@ package com.ash.axis.data.repository
 import com.ash.axis.data.api.ICloudEmsApi
 import com.ash.axis.data.db.CacheDao
 import com.ash.axis.data.db.CacheEntity
+import com.ash.axis.domain.model.AdmitCardEntry
 import com.ash.axis.domain.model.CourseMarks
 import com.ash.axis.domain.model.ExamSession
 import com.ash.axis.domain.model.GradesData
@@ -13,9 +14,11 @@ import com.ash.axis.tenant.Tenants
 import com.ash.core.storage.CacheFreshness
 import com.ash.core.storage.CachePolicy
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MultipartBody
@@ -311,6 +314,102 @@ class GradesRepository
             return data.courses
         }
 
+        suspend fun getAdmitCard(
+            admno: String,
+            brId: Int,
+            forceRefresh: Boolean = false,
+        ): List<AdmitCardEntry> {
+            val cacheKey = "v1_admit_card_$admno"
+            if (!forceRefresh) {
+                val entry = cacheDao.get(cacheKey)
+                if (entry != null) {
+                    val freshness = CachePolicy.ATTENDANCE.evaluate(entry.cachedAt)
+                    if (freshness != CacheFreshness.EXPIRED) {
+                        return runCatching { json.decodeFromString(admitCardSerializer, entry.data) }
+                            .getOrDefault(emptyList())
+                    }
+                }
+            }
+
+            authRepository.refreshTokenIfNeeded()
+            val body =
+                MultipartBody.Builder()
+                    .setType(MultipartBody.FORM)
+                    .addFormDataPart("from", "app")
+                    .addFormDataPart("method", "index")
+                    .addFormDataPart("user_id", admno)
+                    .addFormDataPart("br_id", brId.toString())
+                    .addFormDataPart("client", Tenants.GU.clientCode)
+                    .addFormDataPart("admnum", admno)
+                    .build()
+
+            return try {
+                val response = api.postAdmitCard(body)
+                val result = parseResponse("admitCard", requireBody("admitCard", response))
+                val entries = parseAdmitCardEntries(result)
+                cacheDao.put(
+                    CacheEntity(
+                        key = cacheKey,
+                        data = json.encodeToString(admitCardSerializer, entries),
+                        cachedAt = System.currentTimeMillis(),
+                    ),
+                )
+                entries
+            } catch (e: Exception) {
+                val entry = cacheDao.get(cacheKey)
+                if (entry != null) {
+                    runCatching { json.decodeFromString(admitCardSerializer, entry.data) }
+                        .getOrDefault(emptyList())
+                } else {
+                    throw e
+                }
+            }
+        }
+
+        private fun parseAdmitCardEntries(element: JsonElement): List<AdmitCardEntry> {
+            val array = when (element) {
+                is JsonArray -> element
+                is JsonObject -> {
+                    element["data"]?.jsonArray
+                        ?: element["datalist"]?.jsonArray
+                        ?: element["result"]?.jsonArray
+                        ?: element["admit_card"]?.jsonArray
+                        ?: return emptyList()
+                }
+                else -> return emptyList()
+            }
+            return array.mapNotNull { item ->
+                val obj = item.jsonObject
+                val subName = obj["subject_name"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["sub_name"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["subjectName"]?.jsonPrimitive?.contentOrNull ?: ""
+                val subCode = obj["subject_code"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["sub_code"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["subjectCode"]?.jsonPrimitive?.contentOrNull ?: ""
+                val date = obj["exam_date"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["date"]?.jsonPrimitive?.contentOrNull ?: ""
+                val from = obj["from_time"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["fromTime"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["start_time"]?.jsonPrimitive?.contentOrNull ?: ""
+                val to = obj["to_time"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["toTime"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["end_time"]?.jsonPrimitive?.contentOrNull ?: ""
+                val room = obj["room_no"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["room"]?.jsonPrimitive?.contentOrNull ?: ""
+                val seat = obj["seat_no"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["seat"]?.jsonPrimitive?.contentOrNull ?: ""
+                AdmitCardEntry(
+                    date = date,
+                    subjectName = subName,
+                    subjectCode = subCode,
+                    fromTime = from,
+                    toTime = to,
+                    room = room,
+                    seat = seat,
+                )
+            }
+        }
+
         private fun SelectionOption.toPerformanceOption() = PerformanceOption(id = id, label = label)
 
         private suspend fun getPerformanceContext(
@@ -504,5 +603,7 @@ class GradesRepository
                 kotlinx.serialization.builtins.ListSerializer(ExamSession.serializer())
             val stringListSerializer =
                 kotlinx.serialization.builtins.ListSerializer(kotlinx.serialization.serializer<String>())
+            val admitCardSerializer =
+                kotlinx.serialization.builtins.ListSerializer(AdmitCardEntry.serializer())
         }
     }

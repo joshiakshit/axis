@@ -2,6 +2,8 @@ package com.ash.axis.ui.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.ash.axis.data.DataRefreshSignal
+import com.ash.axis.data.RefreshTrigger
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
 import com.ash.axis.data.repository.SELECTED_SEMESTER_CLASS_KEY
@@ -92,6 +94,7 @@ class DashboardViewModel
         private val timetableUseCase: TimetableUseCase,
         private val preferencesStore: PreferencesStore,
         private val networkMonitor: NetworkMonitor,
+        private val refreshSignal: DataRefreshSignal,
     ) : ViewModel() {
         private val _state = MutableStateFlow(DashboardUiState())
         val state: StateFlow<DashboardUiState> = _state.asStateFlow()
@@ -101,6 +104,13 @@ class DashboardViewModel
         init {
             loadDashboard(forceRefresh = false)
             observeSemesterSelection()
+            viewModelScope.launch {
+                refreshSignal.signal.collect { trigger ->
+                    if (trigger == RefreshTrigger.ALL || trigger == RefreshTrigger.ATTENDANCE) {
+                        loadDashboard(forceRefresh = false)
+                    }
+                }
+            }
         }
 
         fun refresh() {
@@ -230,6 +240,7 @@ class DashboardViewModel
 
                         val offline = networkMonitor.isOnline.first().not()
                         _state.update { computed.copy(isOffline = offline) }
+                        if (forceRefresh) refreshSignal.emit(RefreshTrigger.ALL)
                     } catch (e: Exception) {
                         _state.update { it.copy(isLoading = false, isRefreshing = false, error = ErrorText.forData(e)) }
                     }

@@ -2,6 +2,8 @@ package com.ash.axis.ui.planner
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.ash.axis.data.DataRefreshSignal
+import com.ash.axis.data.RefreshTrigger
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
 import com.ash.axis.data.repository.SELECTED_SEMESTER_CLASS_KEY
@@ -89,6 +91,7 @@ class PlannerViewModel
         private val timetableUseCase: TimetableUseCase,
         private val preferencesStore: PreferencesStore,
         private val networkMonitor: NetworkMonitor,
+        private val refreshSignal: DataRefreshSignal,
     ) : ViewModel() {
         private val _state = MutableStateFlow(PlannerUiState())
         val state: StateFlow<PlannerUiState> = _state.asStateFlow()
@@ -104,6 +107,13 @@ class PlannerViewModel
         init {
             load(forceRefresh = false)
             observePreferences()
+            viewModelScope.launch {
+                refreshSignal.signal.collect { trigger ->
+                    if (trigger == RefreshTrigger.ALL || trigger == RefreshTrigger.ATTENDANCE) {
+                        load(forceRefresh = false)
+                    }
+                }
+            }
         }
 
         fun refresh() = load(forceRefresh = true)
@@ -357,6 +367,7 @@ class PlannerViewModel
                                 isOffline = offline,
                             )
                         }
+                        if (forceRefresh) refreshSignal.emit(RefreshTrigger.ATTENDANCE)
                     } catch (e: Exception) {
                         val offline = networkMonitor.isOnline.first().not()
                         _state.update {

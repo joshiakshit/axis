@@ -87,6 +87,15 @@ internal fun TimetableSlotCard(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    if (!displaySlot.teacherName.isNullOrBlank() && !displaySlot.isSubstitution) {
+                        Text(
+                            displaySlot.teacherName,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                     SubstitutionDetail(displaySlot)
                     Text(
                         buildString {
@@ -118,18 +127,32 @@ private fun SlotTimeColumn(displaySlot: DisplaySlot) {
     val slot = displaySlot.slot
     Column(modifier = Modifier.width(AppDimens.timeColumnWidth)) {
         Text(
-            slot.fromTime,
-            fontSize = 13.sp,
+            formatTime12h(slot.fromTime),
+            fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
             fontFamily = FontFamily.Monospace,
         )
         Text(
-            slot.toTime,
-            fontSize = 11.sp,
+            formatTime12h(slot.toTime),
+            fontSize = 10.sp,
             fontFamily = FontFamily.Monospace,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+private fun formatTime12h(time: String): String {
+    if (time.isBlank()) return ""
+    val parts = time.split(":")
+    val h = parts.getOrNull(0)?.toIntOrNull() ?: return time
+    val m = parts.getOrNull(1)?.toIntOrNull() ?: 0
+    val suffix = if (h < 12) "AM" else "PM"
+    val h12 = when {
+        h == 0 -> 12
+        h > 12 -> h - 12
+        else -> h
+    }
+    return if (m == 0) "$h12 $suffix" else "$h12:${m.toString().padStart(2, '0')} $suffix"
 }
 
 @Composable

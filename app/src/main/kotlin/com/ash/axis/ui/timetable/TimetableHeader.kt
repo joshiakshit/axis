@@ -178,7 +178,7 @@ internal fun DayStrip(
             DayChip(
                 date = date,
                 selected = date == currentDate,
-                hasClasses = dayCache[date]?.slots?.isNotEmpty() == true,
+                hasClasses = dayCache[date]?.items?.any { it is TimetableItem.Slot } == true,
                 isPast = date < LocalDate.now(),
                 onClick = { onSelect(date) },
             )

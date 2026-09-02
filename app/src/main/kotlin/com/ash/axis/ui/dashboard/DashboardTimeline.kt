@@ -177,9 +177,16 @@ internal fun parseTimeMinutes(time: String): Int {
 }
 
 internal fun formatTimeShort(time: String): String {
+    if (time.isBlank()) return ""
     val parts = time.split(":")
     if (parts.size < 2) return time
     val h = parts[0].toIntOrNull() ?: return time
     val m = parts[1].toIntOrNull() ?: 0
-    return if (m == 0) h.toString() else "$h:${m.toString().padStart(2, '0')}"
+    val suffix = if (h < 12) "AM" else "PM"
+    val h12 = when {
+        h == 0 -> 12
+        h > 12 -> h - 12
+        else -> h
+    }
+    return if (m == 0) "$h12 $suffix" else "$h12:${m.toString().padStart(2, '0')} $suffix"
 }

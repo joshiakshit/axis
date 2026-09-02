@@ -2,9 +2,12 @@ package com.ash.axis.ui.timetable
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.ash.axis.data.DataRefreshSignal
+import com.ash.axis.data.RefreshTrigger
 import com.ash.axis.data.export.ExportKeys
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
+import com.ash.axis.data.repository.CalendarRepository
 import com.ash.axis.data.repository.SELECTED_SEMESTER_CLASS_KEY
 import com.ash.axis.data.repository.SELECTED_SEMESTER_YEAR_KEY
 import com.ash.axis.data.repository.TimetableRepository
@@ -44,12 +47,19 @@ data class DisplaySlot(
     val isSubstitution: Boolean = false,
     val originalTeacher: String? = null,
     val substituteTeacher: String? = null,
+    val teacherName: String? = null,
 )
+
+sealed interface TimetableItem {
+    data class Slot(val display: DisplaySlot) : TimetableItem
+    data class Break(val durationMinutes: Int, val startTime: String, val endTime: String) : TimetableItem
+}
 
 data class TimetableDay(
     val dayName: String,
     val dayOfMonth: Int = 0,
-    val slots: ImmutableList<DisplaySlot> = persistentListOf(),
+    val items: ImmutableList<TimetableItem> = persistentListOf(),
+    val holiday: String? = null,
 )
 
 data class TimetableUiState(
@@ -78,9 +88,11 @@ class TimetableViewModel
         private val timetableRepo: TimetableRepository,
         private val attendanceRepo: AttendanceRepository,
         private val authRepository: AuthRepository,
+        private val calendarRepo: CalendarRepository,
         private val timetableUseCase: TimetableUseCase,
         private val preferencesStore: PreferencesStore,
         private val networkMonitor: NetworkMonitor,
+        private val refreshSignal: DataRefreshSignal,
     ) : ViewModel() {
         private val _state = MutableStateFlow(TimetableUiState())
         val state: StateFlow<TimetableUiState> = _state.asStateFlow()
@@ -89,6 +101,7 @@ class TimetableViewModel
 
         // Raw (unprocessed) slots per week, kept so the progress ticker can rebuild today's "LIVE" bars.
         private val rawByWeek = mutableMapOf<LocalDate, Map<String, List<TimetableSlot>>>()
+        private var holidays = mapOf<LocalDate, String>()
 
         init {
             val today = LocalDate.now()
@@ -96,6 +109,15 @@ class TimetableViewModel
             ensureWeekInternal(today, forceRefresh = false, isInitial = true)
             observeSemesterSelection()
             startProgressTicker()
+            loadHolidays()
+            viewModelScope.launch {
+                refreshSignal.signal.collect { trigger ->
+                    if (trigger == RefreshTrigger.ALL || trigger == RefreshTrigger.TIMETABLE) {
+                        val ws = weekStart(_state.value.currentDate)
+                        ensureWeekInternal(ws, forceRefresh = false, isInitial = false)
+                    }
+                }
+            }
         }
 
         // --- Public actions driven by the UI -------------------------------------------------
@@ -136,6 +158,7 @@ class TimetableViewModel
                 _state.update { it.copy(isRefreshing = true) }
                 try {
                     loadWeek(ws, forceRefresh = true)
+                    refreshSignal.emit(RefreshTrigger.TIMETABLE)
                 } catch (e: Exception) {
                     val offline = networkMonitor.isOnline.first().not()
                     _state.update {
@@ -241,7 +264,8 @@ class TimetableViewModel
             val newDays =
                 (0..6).associate { i ->
                     val date = ws.plusDays(i.toLong())
-                    date to buildDay(date, dayOrder[i], timetable[dayOrder[i]] ?: emptyList())
+                    val day = buildDay(date, dayOrder[i], timetable[dayOrder[i]] ?: emptyList())
+                    date to day.copy(holiday = holidays[date])
                 }
             val offline = networkMonitor.isOnline.first().not()
             _state.update {
@@ -256,18 +280,34 @@ class TimetableViewModel
             }
         }
 
+        @Suppress("CyclomaticComplexMethod")
         private fun buildDay(
             date: LocalDate,
             dayName: String,
             slots: List<TimetableSlot>,
         ): TimetableDay {
             val isToday = date == LocalDate.now()
-            return TimetableDay(
-                dayName = dayName,
-                dayOfMonth = date.dayOfMonth,
-                slots =
-                    timetableUseCase.sortSlotsByTime(slots).map { slot ->
-                        val isSub = timetableUseCase.isSubstitution(slot)
+            val sorted = timetableUseCase.sortSlotsByTime(slots)
+            val items = mutableListOf<TimetableItem>()
+
+            sorted.forEachIndexed { index, slot ->
+                if (index > 0) {
+                    val prevEnd = timetableUseCase.timeToMinutes(sorted[index - 1].toTime)
+                    val curStart = timetableUseCase.timeToMinutes(slot.fromTime)
+                    val gap = curStart - prevEnd
+                    if (gap > 5) {
+                        items.add(
+                            TimetableItem.Break(
+                                durationMinutes = gap,
+                                startTime = sorted[index - 1].toTime,
+                                endTime = slot.fromTime,
+                            ),
+                        )
+                    }
+                }
+                val isSub = timetableUseCase.isSubstitution(slot)
+                items.add(
+                    TimetableItem.Slot(
                         DisplaySlot(
                             slot = slot,
                             displayName = timetableUseCase.displaySubjectName(slot),
@@ -275,8 +315,16 @@ class TimetableViewModel
                             isSubstitution = isSub,
                             originalTeacher = if (isSub) timetableUseCase.originalTeacher(slot) else null,
                             substituteTeacher = if (isSub) timetableUseCase.substituteTeacher(slot) else null,
-                        )
-                    }.toImmutableList(),
+                            teacherName = timetableUseCase.originalTeacher(slot),
+                        ),
+                    ),
+                )
+            }
+
+            return TimetableDay(
+                dayName = dayName,
+                dayOfMonth = date.dayOfMonth,
+                items = items.toImmutableList(),
             )
         }
 
@@ -316,6 +364,17 @@ class TimetableViewModel
                         _state.update { it.copy(dayCache = (it.dayCache + (today to rebuilt)).toImmutableMap()) }
                     }
                 }
+            }
+        }
+
+        private fun loadHolidays() {
+            viewModelScope.launch {
+                val user = authRepository.getUserInfo() ?: return@launch
+                val acadYear = timetableUseCase.getAcadYear()
+                val list = runCatching { calendarRepo.getHolidays(user.brId, acadYear) }.getOrDefault(emptyList())
+                holidays = list.mapNotNull { h ->
+                    runCatching { LocalDate.parse(h.date) to h.name }.getOrNull()
+                }.toMap()
             }
         }
 

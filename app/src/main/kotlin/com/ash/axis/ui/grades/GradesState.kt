@@ -1,5 +1,6 @@
 package com.ash.axis.ui.grades
 
+import com.ash.axis.domain.model.AdmitCardEntry
 import com.ash.axis.domain.model.CourseMarks
 import com.ash.axis.domain.model.ExamSession
 import com.ash.axis.domain.model.PerformanceAcadYear
@@ -7,7 +8,7 @@ import com.ash.axis.domain.model.PerformanceOption
 import com.ash.axis.domain.model.ReportCardEntry
 import java.io.File
 
-enum class GradeTab { PERFORMANCE, RESULT }
+enum class GradeTab { PERFORMANCE, RESULT, ADMIT_CARD }
 
 data class GradesUiState(
     val selectedTab: GradeTab = GradeTab.PERFORMANCE,
@@ -45,4 +46,7 @@ data class GradesUiState(
     val showMarksInsights: Boolean = false,
     val courses: List<CourseMarks> = emptyList(),
     val performanceLastUpdated: Long? = null,
+    val admitCards: List<AdmitCardEntry> = emptyList(),
+    val admitCardLoading: Boolean = false,
+    val admitCardError: String? = null,
 )
