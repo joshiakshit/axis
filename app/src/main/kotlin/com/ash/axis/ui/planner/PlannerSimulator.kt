@@ -92,6 +92,8 @@ internal fun SimulatorGrid(
     holidayMode: Boolean,
     anchorDate: LocalDate?,
     dateTimetable: ImmutableMap<LocalDate, ImmutableList<TimetableSlot>>,
+    semesterEndDate: LocalDate?,
+    interactionEnabled: Boolean,
     onPreview: (LocalDate) -> Unit,
     onMarkAbsent: (LocalDate) -> Unit,
     onShiftMonth: (Int) -> Unit,
@@ -122,7 +124,10 @@ internal fun SimulatorGrid(
                     )
                 }
                 Text(monthTitle, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                IconButton(onClick = { onShiftMonth(1) }) {
+                IconButton(
+                    onClick = { onShiftMonth(1) },
+                    enabled = semesterEndDate == null || monthStart.plusMonths(1) <= semesterEndDate.withDayOfMonth(1),
+                ) {
                     Icon(
                         Icons.AutoMirrored.Filled.KeyboardArrowRight,
                         contentDescription = "Next month",
@@ -134,6 +139,7 @@ internal fun SimulatorGrid(
                 selectedCount = selectedDates.size,
                 noClassCount = holidays.size,
                 hasPreview = anchorDate != null,
+                interactionEnabled = interactionEnabled,
                 onToggleHolidayMode = onToggleHolidayMode,
                 onClear = onClear,
             )
@@ -166,6 +172,8 @@ internal fun SimulatorGrid(
                                 markerTypes = markersByDate[date].orEmpty(),
                                 anchorDate = anchorDate,
                                 dateTimetable = dateTimetable,
+                                semesterEndDate = semesterEndDate,
+                                interactionEnabled = interactionEnabled,
                                 onPreview = onPreview,
                                 onMarkAbsent = onMarkAbsent,
                                 modifier = Modifier.weight(1f),
@@ -184,6 +192,7 @@ private fun SimulatorControls(
     selectedCount: Int,
     noClassCount: Int,
     hasPreview: Boolean,
+    interactionEnabled: Boolean,
     onToggleHolidayMode: () -> Unit,
     onClear: () -> Unit,
 ) {
@@ -220,6 +229,7 @@ private fun SimulatorControls(
     }
     Text(
         when {
+            !interactionEnabled -> "Answer today's attendance to start planning."
             selectedCount > 0 || noClassCount > 0 ->
                 buildString {
                     if (selectedCount > 0) append("$selectedCount skipped")
@@ -247,6 +257,8 @@ private fun SimulatorDayCell(
     markerTypes: Set<StudentMarkerType>,
     anchorDate: LocalDate?,
     dateTimetable: ImmutableMap<LocalDate, ImmutableList<TimetableSlot>>,
+    semesterEndDate: LocalDate?,
+    interactionEnabled: Boolean,
     onPreview: (LocalDate) -> Unit,
     onMarkAbsent: (LocalDate) -> Unit,
     modifier: Modifier = Modifier,
@@ -256,9 +268,11 @@ private fun SimulatorDayCell(
     val isToday = date == today
     val isSelected = date in selectedDates
     val isHoliday = date in holidays
+    val isMarkerHoliday = StudentMarkerType.HOLIDAY in markerTypes
     val isAnchor = !isSelected && !isHoliday && date == anchorDate
-    // A day is selectable only if the real (future) timetable has at least one class that day.
-    val hasClasses = dateTimetable[date]?.isNotEmpty() == true
+    val hasClasses = dateTimetable[date]?.isNotEmpty() == true && !isMarkerHoliday
+    val isWithinSemester = semesterEndDate == null || date <= semesterEndDate
+    val canInteract = interactionEnabled && !isPast && isWithinSemester && hasClasses
 
     val bgColor =
         when {
@@ -296,7 +310,7 @@ private fun SimulatorDayCell(
             }
             markerTypes.forEach { append(", ${it.label.lowercase()}") }
             if (hasClasses) append(", has classes") else append(", no classes")
-            if (!isPast && hasClasses) append(", tap to mark, long press to preview")
+            if (canInteract) append(", tap to mark, long press to preview")
         }
     }
 
@@ -308,11 +322,13 @@ private fun SimulatorDayCell(
                 .background(bgColor)
                 .border(1.5.dp, borderColor, AppShapes.small)
                 .then(
-                    if (!isPast && hasClasses) {
+                    if (canInteract) {
                         Modifier
                             .combinedClickable(
                                 role = Role.Button,
-                                onClick = { onMarkAbsent(date) },
+                                onClick = {
+                                    if (isToday) onPreview(date) else onMarkAbsent(date)
+                                },
                                 onLongClick = {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     onPreview(date)
@@ -333,7 +349,7 @@ private fun SimulatorDayCell(
                 color = textColor,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                if (hasClasses && !isPast && !isSelected && !isHoliday && !isAnchor) {
+                if (hasClasses && !isPast && isWithinSemester && !isSelected && !isHoliday && !isAnchor) {
                     MarkerDot(MaterialTheme.colorScheme.primary)
                 }
                 markerTypes.forEach { type -> MarkerDot(markerColor(type)) }

@@ -25,18 +25,24 @@ import com.ash.core.ui.theme.AppShapes
 import com.ash.core.ui.theme.cardColor
 import java.util.Locale
 
-@Suppress("LongMethod")
+@Suppress("LongMethod", "CyclomaticComplexMethod")
 @Composable
 internal fun ImpactCard(
     row: ProjectedSubject,
     threshold: Int,
+    showProjection: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val displayedPercent = if (showProjection) row.projectedPercent else row.maxReachable ?: row.projectedPercent
     val projColor =
-        when (row.projectedTone) {
-            AttendanceTone.OK -> MaterialTheme.colorScheme.primary
-            AttendanceTone.WARN -> MaterialTheme.colorScheme.tertiary
-            AttendanceTone.BAD -> MaterialTheme.colorScheme.error
+        if (!showProjection) {
+            if (displayedPercent >= threshold) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+        } else {
+            when (row.projectedTone) {
+                AttendanceTone.OK -> MaterialTheme.colorScheme.primary
+                AttendanceTone.WARN -> MaterialTheme.colorScheme.tertiary
+                AttendanceTone.BAD -> MaterialTheme.colorScheme.error
+            }
         }
 
     Surface(
@@ -80,8 +86,20 @@ internal fun ImpactCard(
                 }
                 Spacer(Modifier.height(4.dp))
                 val ratioText =
-                    remember(row.currentPresent, row.currentTotal, row.projectedPresent, row.projectedTotal) {
-                        "${row.currentPresent}/${row.currentTotal} → ${row.projectedPresent}/${row.projectedTotal}"
+                    remember(
+                        row.currentPresent,
+                        row.currentTotal,
+                        row.projectedPresent,
+                        row.projectedTotal,
+                        row.maxPresent,
+                        row.maxTotal,
+                        showProjection,
+                    ) {
+                        if (showProjection) {
+                            "${row.currentPresent}/${row.currentTotal} → ${row.projectedPresent}/${row.projectedTotal}"
+                        } else {
+                            "${row.projectedPresent}/${row.projectedTotal} → ${row.maxPresent}/${row.maxTotal}"
+                        }
                     }
                 Text(
                     ratioText,
@@ -89,28 +107,34 @@ internal fun ImpactCard(
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (row.maxReachable != null) {
-                    val canRecover = row.maxReachable >= threshold
-                    val maxText =
-                        remember(row.maxReachable, row.projectedPresent, row.projectedTotal) {
-                            "Max: ${String.format(Locale.US, "%.1f", row.maxReachable)}% (${row.projectedPresent}/${row.projectedTotal})"
-                        }
-                    Text(
-                        maxText,
-                        fontSize = 11.sp,
-                        color =
-                            if (canRecover) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.error
-                            },
-                    )
+                val maximum = row.maxReachable
+                if (showProjection && maximum != null) {
+                    val maxPresent = row.maxPresent
+                    val maxTotal = row.maxTotal
+                    if (maxPresent != null && maxTotal != null) {
+                        val canRecover = maximum >= threshold
+                        val maxText =
+                            remember(maximum, maxPresent, maxTotal) {
+                                "Best by semester end: ${String.format(Locale.US, "%.1f", maximum)}% " +
+                                    "($maxPresent/$maxTotal)"
+                            }
+                        Text(
+                            maxText,
+                            fontSize = 11.sp,
+                            color =
+                                if (canRecover) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.error
+                                },
+                        )
+                    }
                 }
             }
             Column(horizontalAlignment = Alignment.End) {
                 val projText =
-                    remember(row.projectedPercent) {
-                        String.format(Locale.US, "%.1f%%", row.projectedPercent)
+                    remember(displayedPercent) {
+                        String.format(Locale.US, "%.1f%%", displayedPercent)
                     }
                 Text(
                     projText,
@@ -119,7 +143,14 @@ internal fun ImpactCard(
                     color = projColor,
                     fontWeight = FontWeight.Bold,
                 )
-                if (row.projectedTone != row.baselineTone) {
+                if (!showProjection) {
+                    Text(
+                        "MAX",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else if (row.projectedTone != row.baselineTone) {
                     Surface(
                         shape = AppShapes.small,
                         color =

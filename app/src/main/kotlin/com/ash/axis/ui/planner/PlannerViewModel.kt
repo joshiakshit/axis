@@ -22,6 +22,7 @@ import com.ash.axis.domain.usecase.PlannerUseCase
 import com.ash.axis.domain.usecase.ProjectedSubject
 import com.ash.axis.domain.usecase.SubjectAttendance
 import com.ash.axis.domain.usecase.TimetableUseCase
+import com.ash.axis.domain.usecase.TodayAttendance
 import com.ash.axis.ui.ErrorText
 import com.ash.core.network.NetworkMonitor
 import com.ash.core.storage.PreferencesStore
@@ -72,6 +73,10 @@ data class PlannerUiState(
     val isRefreshing: Boolean = false,
     val simulatorMonth: LocalDate = LocalDate.now().withDayOfMonth(1),
     val semesterEndSet: Boolean = false,
+    val semesterEndDate: LocalDate? = null,
+    val todayHasClasses: Boolean = false,
+    val todayClassCount: Int = 0,
+    val todayAttendance: TodayAttendance? = null,
     val isOffline: Boolean = false,
 )
 
@@ -151,6 +156,16 @@ class PlannerViewModel
             }
         }
 
+        fun setTodayAttendance(attendance: TodayAttendance) {
+            if (attendance == TodayAttendance.NO_CLASSES) return
+            viewModelScope.launch {
+                preferencesStore.putUserString(TODAY_ATTENDANCE_DATE_KEY, LocalDate.now().toString())
+                preferencesStore.putUserString(TODAY_ATTENDANCE_STATUS_KEY, attendance.name)
+                val base = _state.value.copy(todayAttendance = attendance)
+                _state.value = recomputeProjection(base)
+            }
+        }
+
         fun markAbsent(date: LocalDate) {
             viewModelScope.launch {
                 val current = _state.value
@@ -180,23 +195,24 @@ class PlannerViewModel
 
         private suspend fun recomputeProjection(base: PlannerUiState): PlannerUiState {
             val today = LocalDate.now()
+            val todayAttendance = base.todayAttendance ?: return base.copy(projected = persistentListOf())
             val absenceDates = base.selectedDates
             val noClassDates = base.holidays + markerNoClassDates(base.markers)
             val horizon =
                 listOfNotNull(
                     base.anchorDate,
                     absenceDates.filter { !it.isBefore(today) }.maxOrNull(),
-                    noClassDates.filter { !it.isBefore(today) }.maxOrNull(),
                 ).maxOrNull()
-                    ?: return base.copy(projected = persistentListOf())
 
             val cachedRange = dateTimetableRange
-            if (cachedRange == null || horizon > cachedRange.second) {
+            if (horizon != null && (cachedRange == null || horizon > cachedRange.second)) {
                 fetchDateTimetable(today, horizon)
             }
 
             val projectionData =
-                dateTimetableCache.filterKeys { it in today..horizon && it !in noClassDates }
+                dateTimetableCache.filterKeys { date ->
+                    date !in noClassDates && (date == today || horizon?.let { date in today..it } == true)
+                }
             val projected =
                 withContext(Dispatchers.Default) {
                     val raw =
@@ -210,6 +226,8 @@ class PlannerViewModel
                             today,
                             includeNoAbsence = true,
                             noClassDates = noClassDates,
+                            projectionEnd = horizon,
+                            todayAttendance = todayAttendance,
                         )
                     val focusDate = base.anchorDate ?: absenceDates.maxOrNull()
                     val dayKey = focusDate?.let { DAY_NAMES[it.dayOfWeek] }
@@ -358,12 +376,21 @@ class PlannerViewModel
                         val today = LocalDate.now()
                         val cacheEnd = today.plusWeeks(4)
                         primeDateTimetableCache(user, semester.yearId, today to cacheEnd, timetable, forceRefresh)
+                        val todayHasClasses = dateTimetableCache[today].orEmpty().isNotEmpty()
+                        val savedTodayDate = preferencesStore.getUserString(TODAY_ATTENDANCE_DATE_KEY).first()
+                        val savedTodayStatus = preferencesStore.getUserString(TODAY_ATTENDANCE_STATUS_KEY).first()
+                        val todayAttendance =
+                            when {
+                                !todayHasClasses -> TodayAttendance.NO_CLASSES
+                                savedTodayDate != today.toString() -> null
+                                else -> runCatching { TodayAttendance.valueOf(savedTodayStatus) }.getOrNull()
+                            }
 
                         val offline = networkMonitor.isOnline.first().not()
                         val immutableTimetable =
                             timetable.mapValues { (_, v) -> v.toImmutableList() }.toImmutableMap()
-                        _state.update {
-                            it.copy(
+                        val loaded =
+                            _state.value.copy(
                                 isLoading = false,
                                 isRefreshing = false,
                                 error = null,
@@ -378,9 +405,13 @@ class PlannerViewModel
                                 anchorDate = null,
                                 projected = persistentListOf(),
                                 semesterEndSet = cachedSemesterEnd != null,
+                                semesterEndDate = cachedSemesterEnd,
+                                todayHasClasses = todayHasClasses,
+                                todayClassCount = dateTimetableCache[today].orEmpty().size,
+                                todayAttendance = todayAttendance,
                                 isOffline = offline,
                             )
-                        }
+                        _state.value = if (todayAttendance == null) loaded else recomputeProjection(loaded)
                         observeMarkers(user.admno)
                         if (forceRefresh) refreshSignal.emit(RefreshTrigger.ATTENDANCE, refreshSourceId)
                     } catch (e: Exception) {
@@ -399,7 +430,24 @@ class PlannerViewModel
             markerJob =
                 viewModelScope.launch {
                     markerRepository.observe(ownerId).collect { markers ->
-                        val base = _state.value.copy(markers = markers.toImmutableList())
+                        val today = LocalDate.now()
+                        val hasClasses =
+                            dateTimetableCache[today].orEmpty().isNotEmpty() &&
+                                today !in markerNoClassDates(markers)
+                        val currentAttendance = _state.value.todayAttendance
+                        val todayAttendance =
+                            when {
+                                !hasClasses -> TodayAttendance.NO_CLASSES
+                                currentAttendance == TodayAttendance.NO_CLASSES -> null
+                                else -> currentAttendance
+                            }
+                        val base =
+                            _state.value.copy(
+                                markers = markers.toImmutableList(),
+                                todayHasClasses = hasClasses,
+                                todayClassCount = if (hasClasses) dateTimetableCache[today].orEmpty().size else 0,
+                                todayAttendance = todayAttendance,
+                            )
                         _state.value = recomputeProjection(base)
                     }
                 }
@@ -510,6 +558,9 @@ class PlannerViewModel
         )
 
         private companion object {
+            const val TODAY_ATTENDANCE_DATE_KEY = "planner_today_attendance_date"
+            const val TODAY_ATTENDANCE_STATUS_KEY = "planner_today_attendance_status"
+
             val DAY_NAMES =
                 mapOf(
                     java.time.DayOfWeek.MONDAY to "Mon",

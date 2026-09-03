@@ -41,6 +41,10 @@ import com.ash.core.ui.theme.AppShapes
 import com.ash.core.ui.theme.cardColor
 import com.ash.core.util.Result
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+
+private val impactDateFormatter = DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH)
 
 @Suppress("LongMethod", "CyclomaticComplexMethod")
 @Composable
@@ -90,6 +94,14 @@ fun PlannerScreen(
 
                 item(key = "simulator_grid", contentType = "simulator") {
                     if (data.semesterEndSet) {
+                        if (data.todayHasClasses) {
+                            TodayAttendanceCard(
+                                classCount = data.todayClassCount,
+                                attendance = data.todayAttendance,
+                                onSelect = viewModel::setTodayAttendance,
+                            )
+                            Spacer(Modifier.height(AppDimens.itemSpacing))
+                        }
                         SimulatorGrid(
                             month = data.simulatorMonth,
                             selectedDates = data.selectedDates,
@@ -98,6 +110,8 @@ fun PlannerScreen(
                             holidayMode = data.holidayMode,
                             anchorDate = data.anchorDate,
                             dateTimetable = data.dateTimetable,
+                            semesterEndDate = data.semesterEndDate,
+                            interactionEnabled = data.todayAttendance != null,
                             onPreview = viewModel::previewDate,
                             onMarkAbsent = viewModel::markAbsent,
                             onShiftMonth = viewModel::shiftSimulatorMonth,
@@ -112,7 +126,11 @@ fun PlannerScreen(
                 item(key = "projected_header", contentType = "projected_header") {
                     if (data.projected.isNotEmpty()) {
                         Text(
-                            "ATTENDANCE IMPACT",
+                            if (data.anchorDate != null) {
+                                "PROJECTED ON ${data.anchorDate.format(impactDateFormatter).uppercase()}"
+                            } else {
+                                "BEST POSSIBLE BY SEMESTER END"
+                            },
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 0.6.sp,
@@ -126,7 +144,12 @@ fun PlannerScreen(
                     key = { "${it.code}_${it.lecType}" },
                     contentType = { "impact_card" },
                 ) { row ->
-                    ImpactCard(row, data.threshold, modifier = Modifier.animateItem())
+                    ImpactCard(
+                        row = row,
+                        threshold = data.threshold,
+                        showProjection = data.anchorDate != null,
+                        modifier = Modifier.animateItem(),
+                    )
                 }
 
                 item(key = "bottom_spacer", contentType = "footer") { BottomSpacer() }
