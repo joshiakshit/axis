@@ -42,7 +42,11 @@ data class ProjectedSubject(
     val baselineTone: AttendanceTone,
     val projectedTone: AttendanceTone,
     val maxReachable: Double? = null,
+    val maxPresent: Int? = null,
+    val maxTotal: Int? = null,
 )
+
+enum class TodayAttendance { ATTENDED, MISSED, NO_CLASSES }
 
 class PlannerUseCase
     @Inject
@@ -110,20 +114,36 @@ class PlannerUseCase
             today: LocalDate = LocalDate.now(),
             includeNoAbsence: Boolean = false,
             noClassDates: Set<LocalDate> = emptySet(),
+            projectionEnd: LocalDate? = dateTimetable.keys.maxOrNull(),
+            todayAttendance: TodayAttendance = TodayAttendance.NO_CLASSES,
         ): List<ProjectedSubject> {
             if (selectedDates.isEmpty() && !includeNoAbsence) return emptyList()
 
-            val futureDates = selectedDates.filter { it >= today }.sorted()
-            if (futureDates.isEmpty() && !includeNoAbsence) return emptyList()
+            val futureDates = selectedDates.filter { it > today }.sorted()
+            val hasTodayOutcome = todayAttendance != TodayAttendance.NO_CLASSES && dateTimetable[today].orEmpty().isNotEmpty()
+            if (futureDates.isEmpty() && !includeNoAbsence && !hasTodayOutcome) return emptyList()
 
             val subjectKeys = buildSlotMatcher(subjects)
             val names = buildNameMatcher(subjects)
 
+            val todayPresentPerSubject = mutableMapOf<String, Int>()
+            val todayTotalPerSubject = mutableMapOf<String, Int>()
             val totalPerSubject = mutableMapOf<String, Int>()
             val absentPerSubject = mutableMapOf<String, Int>()
 
+            if (todayAttendance != TodayAttendance.NO_CLASSES && today !in noClassDates) {
+                for (slot in dateTimetable[today].orEmpty()) {
+                    val ownerKey = resolveSlotOwner(slot, subjectKeys, names) ?: continue
+                    todayTotalPerSubject[ownerKey] = (todayTotalPerSubject[ownerKey] ?: 0) + 1
+                    if (todayAttendance == TodayAttendance.ATTENDED) {
+                        todayPresentPerSubject[ownerKey] = (todayPresentPerSubject[ownerKey] ?: 0) + 1
+                    }
+                }
+            }
+
             for ((date, slots) in dateTimetable) {
-                if (date < today || date in noClassDates) continue
+                val outsideProjection = projectionEnd == null || date > projectionEnd
+                if (date <= today || outsideProjection || date in noClassDates) continue
                 val isAbsence = date in selectedDates
 
                 for (slot in slots) {
@@ -135,7 +155,7 @@ class PlannerUseCase
 
             val semesterSlots =
                 if (semesterEnd != null && semesterEnd >= today && weeklyTimetable.isNotEmpty()) {
-                    countSemesterSlots(today, semesterEnd, weeklyTimetable, subjectKeys, names, noClassDates)
+                    countSemesterSlots(today.plusDays(1), semesterEnd, weeklyTimetable, subjectKeys, names, noClassDates)
                 } else {
                     emptyMap()
                 }
@@ -145,16 +165,27 @@ class PlannerUseCase
                     val ownerKey = "${s.code.uppercase()}_${s.lecType.uppercase()}"
                     val absences = absentPerSubject[ownerKey] ?: 0
                     val rangeTotal = totalPerSubject[ownerKey] ?: 0
-                    if (absences == 0 && !(includeNoAbsence && rangeTotal > 0)) return@mapNotNull null
-                    val sharedTotal = s.total + rangeTotal
-                    val baselinePercent = if (sharedTotal > 0) (s.present + rangeTotal) * 100.0 / sharedTotal else 0.0
-                    val projPercent = if (sharedTotal > 0) (s.present + rangeTotal - absences) * 100.0 / sharedTotal else 0.0
+                    val todayPresent = todayPresentPerSubject[ownerKey] ?: 0
+                    val todayTotal = todayTotalPerSubject[ownerKey] ?: 0
+                    val hasMaximum = semesterEnd != null && semesterEnd >= today
+                    val includeUnchanged = includeNoAbsence && (rangeTotal > 0 || hasMaximum)
+                    if (absences == 0 && todayTotal == 0 && !includeUnchanged) {
+                        return@mapNotNull null
+                    }
+                    val knownPresent = s.present + todayPresent
+                    val knownTotal = s.total + todayTotal
+                    val sharedTotal = knownTotal + rangeTotal
+                    val baselinePresent = knownPresent + rangeTotal
+                    val baselinePercent = if (sharedTotal > 0) baselinePresent * 100.0 / sharedTotal else 0.0
+                    val projectedPresent = baselinePresent - absences
+                    val projPercent = if (sharedTotal > 0) projectedPresent * 100.0 / sharedTotal else 0.0
                     val projTone = attendanceUseCase.tone(projPercent, threshold)
-                    val semClasses = semesterSlots[ownerKey] ?: 0L
+                    val semClasses = (semesterSlots[ownerKey] ?: 0L).toInt()
+                    val maxPresent = if (hasMaximum) knownPresent + semClasses else null
+                    val maxTotal = if (hasMaximum) knownTotal + semClasses else null
                     val maxReachable =
-                        if (semClasses > 0) {
-                            val semTotal = s.total + semClasses
-                            if (semTotal > 0) (s.present + semClasses - absences) * 100.0 / semTotal else null
+                        if (maxPresent != null && maxTotal != null && maxTotal > 0) {
+                            maxPresent * 100.0 / maxTotal
                         } else {
                             null
                         }
@@ -164,7 +195,7 @@ class PlannerUseCase
                         lecType = s.lecType,
                         currentPresent = s.present,
                         currentTotal = s.total,
-                        projectedPresent = s.present + rangeTotal - absences,
+                        projectedPresent = projectedPresent,
                         projectedTotal = sharedTotal,
                         currentPercent = s.percent,
                         baselinePercent = baselinePercent,
@@ -174,6 +205,8 @@ class PlannerUseCase
                         baselineTone = attendanceUseCase.tone(baselinePercent, threshold),
                         projectedTone = projTone,
                         maxReachable = maxReachable,
+                        maxPresent = maxPresent,
+                        maxTotal = maxTotal,
                     )
                 }
                 .sortedBy { it.delta }

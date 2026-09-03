@@ -146,6 +146,7 @@ class PlannerUseCaseTest {
                 semesterEnd,
                 timetable,
                 today = nextMon,
+                todayAttendance = TodayAttendance.MISSED,
             )
         assertTrue(result.isNotEmpty())
         val math = result.find { it.code == "CS101" }!!
@@ -335,10 +336,116 @@ class PlannerUseCaseTest {
                 semesterEnd = nextMonday.plusDays(7),
                 weeklyTimetable = timetable,
                 today = nextMonday,
+                todayAttendance = TodayAttendance.MISSED,
                 noClassDates = setOf(nextMonday.plusDays(7)),
             )
 
         val math = result.find { it.code == "CS101" }!!
         assertEquals(81.0 * 100.0 / 102.0, math.maxReachable!!, 0.01)
+    }
+
+    @Test
+    fun `today attended is included before the semester maximum`() {
+        val monday = LocalDate.of(2026, 9, 7)
+        val plannerSubjects = plannerUseCase.buildPlannerSubjects(subjects, timetable, 75)
+
+        val result =
+            plannerUseCase.computeProjected(
+                subjects = plannerSubjects,
+                selectedDates = emptySet(),
+                dateTimetable = mapOf(monday to timetable.getValue("Mon")),
+                semesterEnd = monday.plusDays(7),
+                weeklyTimetable = timetable,
+                today = monday,
+                includeNoAbsence = true,
+                todayAttendance = TodayAttendance.ATTENDED,
+            )
+
+        val math = result.first { it.code == "CS101" }
+        assertEquals(83, math.maxPresent)
+        assertEquals(103, math.maxTotal)
+        assertEquals(83.0 * 100.0 / 103.0, math.maxReachable!!, 0.01)
+    }
+
+    @Test
+    fun `today missed lowers the semester maximum`() {
+        val monday = LocalDate.of(2026, 9, 7)
+        val plannerSubjects = plannerUseCase.buildPlannerSubjects(subjects, timetable, 75)
+
+        val result =
+            plannerUseCase.computeProjected(
+                subjects = plannerSubjects,
+                selectedDates = emptySet(),
+                dateTimetable = mapOf(monday to timetable.getValue("Mon")),
+                semesterEnd = monday.plusDays(7),
+                weeklyTimetable = timetable,
+                today = monday,
+                includeNoAbsence = true,
+                todayAttendance = TodayAttendance.MISSED,
+            )
+
+        val math = result.first { it.code == "CS101" }
+        assertEquals(82, math.maxPresent)
+        assertEquals(103, math.maxTotal)
+        assertEquals(82.0 * 100.0 / 103.0, math.maxReachable!!, 0.01)
+    }
+
+    @Test
+    fun `projection stops at the held date`() {
+        val monday = LocalDate.of(2026, 9, 7)
+        val wednesday = monday.plusDays(2)
+        val nextMonday = monday.plusDays(7)
+        val plannerSubjects = plannerUseCase.buildPlannerSubjects(subjects, timetable, 75)
+        val dateTimetable =
+            mapOf(
+                monday to timetable.getValue("Mon"),
+                wednesday to timetable.getValue("Wed"),
+                nextMonday to timetable.getValue("Mon"),
+            )
+
+        val result =
+            plannerUseCase.computeProjected(
+                subjects = plannerSubjects,
+                selectedDates = setOf(wednesday),
+                dateTimetable = dateTimetable,
+                today = monday,
+                includeNoAbsence = true,
+                projectionEnd = wednesday,
+                todayAttendance = TodayAttendance.ATTENDED,
+            )
+
+        val math = result.first { it.code == "CS101" }
+        assertEquals(81, math.projectedPresent)
+        assertEquals(102, math.projectedTotal)
+    }
+
+    @Test
+    fun `semester maximum assumes all future classes are attended`() {
+        val monday = LocalDate.of(2026, 9, 7)
+        val nextMonday = monday.plusDays(7)
+        val plannerSubjects = plannerUseCase.buildPlannerSubjects(subjects, timetable, 75)
+
+        val result =
+            plannerUseCase.computeProjected(
+                subjects = plannerSubjects,
+                selectedDates = setOf(nextMonday),
+                dateTimetable =
+                    mapOf(
+                        monday to timetable.getValue("Mon"),
+                        nextMonday to timetable.getValue("Mon"),
+                    ),
+                semesterEnd = nextMonday,
+                weeklyTimetable = timetable,
+                today = monday,
+                includeNoAbsence = true,
+                projectionEnd = nextMonday,
+                todayAttendance = TodayAttendance.ATTENDED,
+            )
+
+        val math = result.first { it.code == "CS101" }
+        assertEquals(81, math.projectedPresent)
+        assertEquals(102, math.projectedTotal)
+        assertEquals(83, math.maxPresent)
+        assertEquals(103, math.maxTotal)
     }
 }
