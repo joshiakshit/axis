@@ -13,7 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.ash.axis.ui.AppFooter
+import com.ash.axis.ui.BottomSpacer
 import com.ash.core.ui.components.LoadingStateContainer
 import com.ash.core.ui.components.OfflineBanner
 import com.ash.core.ui.theme.AppDimens
@@ -69,7 +69,7 @@ fun DaywiseScreen(
                 )
             }
             item { SelectedDayCard(data) }
-            item { AppFooter() }
+            item { BottomSpacer() }
         }
     }
 }

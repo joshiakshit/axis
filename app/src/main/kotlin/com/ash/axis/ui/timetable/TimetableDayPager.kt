@@ -33,7 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
-import com.ash.axis.ui.AppFooter
+import com.ash.axis.ui.BottomSpacer
 import com.ash.core.ui.theme.AppDimens
 import com.ash.core.ui.theme.AppShapes
 import kotlinx.collections.immutable.ImmutableMap
@@ -170,7 +170,7 @@ private fun DaySlotList(day: TimetableDay) {
             key = { index, item ->
                 when (item) {
                     is TimetableItem.Slot -> "${index}_${item.display.slot.subjectId}_${item.display.slot.fromTime}"
-                    is TimetableItem.Break -> "break_${index}"
+                    is TimetableItem.Break -> "break_$index"
                 }
             },
             contentType = { _, item ->
@@ -185,7 +185,7 @@ private fun DaySlotList(day: TimetableDay) {
                 is TimetableItem.Break -> BreakRow(item)
             }
         }
-        item(contentType = "footer") { AppFooter() }
+        item(contentType = "footer") { BottomSpacer() }
     }
 }
 

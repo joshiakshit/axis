@@ -15,7 +15,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ash.axis.domain.usecase.AttendanceTone
-import com.ash.axis.ui.AppFooter
+import com.ash.axis.ui.BottomSpacer
 import com.ash.core.ui.components.LoadingStateContainer
 import com.ash.core.ui.components.OfflineBanner
 import com.ash.core.ui.components.PullToRefreshContainer
@@ -87,7 +87,7 @@ fun DashboardScreen(
                     item(contentType = "subject_list") { SubjectSummaryList(atRiskSubjects) }
                 }
 
-                item(contentType = "footer") { AppFooter() }
+                item(contentType = "footer") { BottomSpacer() }
             }
         }
     }

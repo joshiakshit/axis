@@ -22,7 +22,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ash.axis.domain.model.AdmitCardEntry
-import com.ash.axis.ui.AppFooter
+import com.ash.axis.ui.BottomSpacer
 import com.ash.core.ui.theme.AppDimens
 import com.ash.core.ui.theme.AppShapes
 import com.ash.core.ui.theme.cardColor
@@ -45,7 +45,7 @@ internal fun AdmitCardContent(
         ) { _, entry ->
             AdmitCardEntryCard(entry)
         }
-        item { AppFooter() }
+        item { BottomSpacer() }
     }
 }
 
@@ -88,10 +88,11 @@ private fun AdmitCardEntryCard(entry: AdmitCardEntry) {
                 if (entry.fromTime.isNotBlank() || entry.toTime.isNotBlank()) {
                     DetailItem(
                         label = "Time",
-                        value = listOfNotNull(
-                            entry.fromTime.takeIf { it.isNotBlank() },
-                            entry.toTime.takeIf { it.isNotBlank() },
-                        ).joinToString(" - "),
+                        value =
+                            listOfNotNull(
+                                entry.fromTime.takeIf { it.isNotBlank() },
+                                entry.toTime.takeIf { it.isNotBlank() },
+                            ).joinToString(" - "),
                     )
                 }
                 if (entry.room.isNotBlank()) {
@@ -106,7 +107,10 @@ private fun AdmitCardEntryCard(entry: AdmitCardEntry) {
 }
 
 @Composable
-private fun DetailItem(label: String, value: String) {
+private fun DetailItem(
+    label: String,
+    value: String,
+) {
     Column {
         Text(
             label,

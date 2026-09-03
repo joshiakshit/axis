@@ -34,7 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ash.axis.domain.model.ReportCardEntry
-import com.ash.axis.ui.AppFooter
+import com.ash.axis.ui.BottomSpacer
 import com.ash.core.ui.theme.AppDimens
 import com.ash.core.ui.theme.AppShapes
 import com.ash.core.ui.theme.cardColor
@@ -165,7 +165,7 @@ internal fun ResultContent(
             }
         }
 
-        item { AppFooter() }
+        item { BottomSpacer() }
     }
 }
 

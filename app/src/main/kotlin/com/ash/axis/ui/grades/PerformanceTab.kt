@@ -18,7 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.ash.axis.ui.AppFooter
+import com.ash.axis.ui.BottomSpacer
 import com.ash.core.ui.theme.AppDimens
 
 @Composable
@@ -88,6 +88,6 @@ internal fun PerformanceContent(
             }
         }
 
-        item { AppFooter() }
+        item { BottomSpacer() }
     }
 }

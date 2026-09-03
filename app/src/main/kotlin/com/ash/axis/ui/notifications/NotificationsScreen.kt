@@ -30,7 +30,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ash.axis.domain.model.AppNotification
-import com.ash.axis.ui.AppFooter
+import com.ash.axis.ui.BottomSpacer
 import com.ash.core.ui.components.EmptyState
 import com.ash.core.ui.components.LoadingStateContainer
 import com.ash.core.ui.components.PullToRefreshContainer
@@ -92,7 +92,7 @@ fun NotificationsScreen(
                         ) { _, notification ->
                             NotificationCard(notification)
                         }
-                        item { AppFooter() }
+                        item { BottomSpacer() }
                     }
                 }
             }

@@ -23,7 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.ash.axis.ui.AppFooter
+import com.ash.axis.ui.BottomSpacer
 import com.ash.core.ui.components.LoadingStateContainer
 import com.ash.core.ui.components.OfflineBanner
 import com.ash.core.ui.components.PullToRefreshContainer
@@ -83,7 +83,7 @@ private fun AttendanceContent(data: AttendanceUiState) {
             }
         }
 
-        item { AppFooter() }
+        item { BottomSpacer() }
     }
 }
 
