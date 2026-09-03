@@ -52,6 +52,7 @@ data class DisplaySlot(
 
 sealed interface TimetableItem {
     data class Slot(val display: DisplaySlot) : TimetableItem
+
     data class Break(val durationMinutes: Int, val startTime: String, val endTime: String) : TimetableItem
 }
 
@@ -94,6 +95,8 @@ class TimetableViewModel
         private val networkMonitor: NetworkMonitor,
         private val refreshSignal: DataRefreshSignal,
     ) : ViewModel() {
+        private val refreshSourceId = DataRefreshSignal.newSourceId()
+
         private val _state = MutableStateFlow(TimetableUiState())
         val state: StateFlow<TimetableUiState> = _state.asStateFlow()
 
@@ -111,8 +114,10 @@ class TimetableViewModel
             startProgressTicker()
             loadHolidays()
             viewModelScope.launch {
-                refreshSignal.signal.collect { trigger ->
-                    if (trigger == RefreshTrigger.ALL || trigger == RefreshTrigger.TIMETABLE) {
+                refreshSignal.signal.collect { event ->
+                    if (event.sourceId != refreshSourceId &&
+                        (event.trigger == RefreshTrigger.ALL || event.trigger == RefreshTrigger.TIMETABLE)
+                    ) {
                         val ws = weekStart(_state.value.currentDate)
                         ensureWeekInternal(ws, forceRefresh = false, isInitial = false)
                     }
@@ -158,7 +163,7 @@ class TimetableViewModel
                 _state.update { it.copy(isRefreshing = true) }
                 try {
                     loadWeek(ws, forceRefresh = true)
-                    refreshSignal.emit(RefreshTrigger.TIMETABLE)
+                    refreshSignal.emit(RefreshTrigger.TIMETABLE, refreshSourceId)
                 } catch (e: Exception) {
                     val offline = networkMonitor.isOnline.first().not()
                     _state.update {
@@ -372,9 +377,10 @@ class TimetableViewModel
                 val user = authRepository.getUserInfo() ?: return@launch
                 val acadYear = timetableUseCase.getAcadYear()
                 val list = runCatching { calendarRepo.getHolidays(user.brId, acadYear) }.getOrDefault(emptyList())
-                holidays = list.mapNotNull { h ->
-                    runCatching { LocalDate.parse(h.date) to h.name }.getOrNull()
-                }.toMap()
+                holidays =
+                    list.mapNotNull { h ->
+                        runCatching { LocalDate.parse(h.date) to h.name }.getOrNull()
+                    }.toMap()
             }
         }
 

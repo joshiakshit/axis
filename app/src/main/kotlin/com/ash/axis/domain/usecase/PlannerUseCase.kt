@@ -26,17 +26,6 @@ data class DaySafety(
     val riskySubjects: List<String>,
 )
 
-data class TomorrowClass(
-    val subjectName: String,
-    val subCode: String,
-    val lecType: String,
-    val time: String,
-    val skipsLeft: Int,
-    val canSkip: Boolean,
-    val percentAfterSkip: Double,
-    val toneAfterSkip: AttendanceTone,
-)
-
 data class ProjectedSubject(
     val code: String,
     val name: String,
@@ -60,32 +49,6 @@ class PlannerUseCase
     constructor(
         private val attendanceUseCase: AttendanceUseCase,
     ) {
-        fun buildTomorrowClasses(
-            slots: List<TimetableSlot>,
-            subjects: List<PlannerSubject>,
-            threshold: Int,
-        ): List<TomorrowClass> {
-            val slotMatcher = buildSlotMatcher(subjects)
-            val nameMatcher = buildNameMatcher(subjects)
-            val subjectIndex = subjects.associateBy { "${it.code.uppercase()}_${it.lecType.uppercase()}" }
-            return slots.mapNotNull { slot ->
-                val ownerKey = resolveSlotOwner(slot, slotMatcher, nameMatcher) ?: return@mapNotNull null
-                val subject = subjectIndex[ownerKey] ?: return@mapNotNull null
-                val newTotal = subject.total + 1
-                val pctAfterSkip = if (newTotal > 0) subject.present * 100.0 / newTotal else 0.0
-                TomorrowClass(
-                    subjectName = subject.name,
-                    subCode = subject.code,
-                    lecType = subject.lecType,
-                    time = "${slot.fromTime} – ${slot.toTime}",
-                    skipsLeft = subject.bunkable,
-                    canSkip = subject.bunkable > 0,
-                    percentAfterSkip = pctAfterSkip,
-                    toneAfterSkip = attendanceUseCase.tone(pctAfterSkip, threshold),
-                )
-            }
-        }
-
         fun buildPlannerSubjects(
             subjects: List<SubjectAttendance>,
             timetable: Map<String, List<TimetableSlot>>,
@@ -146,6 +109,7 @@ class PlannerUseCase
             weeklyTimetable: Map<String, List<TimetableSlot>> = emptyMap(),
             today: LocalDate = LocalDate.now(),
             includeNoAbsence: Boolean = false,
+            noClassDates: Set<LocalDate> = emptySet(),
         ): List<ProjectedSubject> {
             if (selectedDates.isEmpty() && !includeNoAbsence) return emptyList()
 
@@ -159,7 +123,7 @@ class PlannerUseCase
             val absentPerSubject = mutableMapOf<String, Int>()
 
             for ((date, slots) in dateTimetable) {
-                if (date < today) continue
+                if (date < today || date in noClassDates) continue
                 val isAbsence = date in selectedDates
 
                 for (slot in slots) {
@@ -171,7 +135,7 @@ class PlannerUseCase
 
             val semesterSlots =
                 if (semesterEnd != null && semesterEnd >= today && weeklyTimetable.isNotEmpty()) {
-                    countSemesterSlots(today, semesterEnd, weeklyTimetable, subjectKeys, names)
+                    countSemesterSlots(today, semesterEnd, weeklyTimetable, subjectKeys, names, noClassDates)
                 } else {
                     emptyMap()
                 }
@@ -250,10 +214,15 @@ class PlannerUseCase
             weeklyTimetable: Map<String, List<TimetableSlot>>,
             subjectKeys: Map<String, String>,
             nameKeys: Map<String, String> = emptyMap(),
+            noClassDates: Set<LocalDate> = emptySet(),
         ): Map<String, Long> {
             val counts = mutableMapOf<String, Long>()
             var date = start
             while (date <= end) {
+                if (date in noClassDates) {
+                    date = date.plusDays(1)
+                    continue
+                }
                 val dayName = DAY_NAMES[date.dayOfWeek] ?: ""
                 val slots = weeklyTimetable[dayName] ?: emptyList()
                 for (slot in slots) {

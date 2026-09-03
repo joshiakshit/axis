@@ -11,6 +11,7 @@ import com.ash.axis.data.api.RemoteConfigApi
 import com.ash.axis.data.config.RemoteConfigRepository
 import com.ash.axis.data.db.AppDatabase
 import com.ash.axis.data.db.CacheDao
+import com.ash.axis.data.db.StudentMarkerDao
 import com.ash.axis.tenant.Tenants
 import com.ash.core.security.SecretProvider
 import dagger.Module
@@ -166,9 +167,17 @@ object AppModule {
         @ApplicationContext context: Context,
     ): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "axis.db")
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_2_3,
+                AppDatabase.MIGRATION_3_4,
+            )
             .fallbackToDestructiveMigration()
             .build()
 
     @Provides
     fun provideCacheDao(db: AppDatabase): CacheDao = db.cacheDao()
+
+    @Provides
+    fun provideStudentMarkerDao(db: AppDatabase): StudentMarkerDao = db.studentMarkerDao()
 }

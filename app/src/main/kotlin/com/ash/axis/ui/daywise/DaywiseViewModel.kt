@@ -60,6 +60,8 @@ class DaywiseViewModel
         private val networkMonitor: NetworkMonitor,
         private val refreshSignal: DataRefreshSignal,
     ) : ViewModel() {
+        private val refreshSourceId = DataRefreshSignal.newSourceId()
+
         private val _state = MutableStateFlow(DaywiseUiState())
         val state: StateFlow<DaywiseUiState> = _state.asStateFlow()
 
@@ -73,8 +75,10 @@ class DaywiseViewModel
             load(forceRefresh = false)
             observeSemesterSelection()
             viewModelScope.launch {
-                refreshSignal.signal.collect { trigger ->
-                    if (trigger == RefreshTrigger.ALL || trigger == RefreshTrigger.ATTENDANCE) {
+                refreshSignal.signal.collect { event ->
+                    if (event.sourceId != refreshSourceId &&
+                        (event.trigger == RefreshTrigger.ALL || event.trigger == RefreshTrigger.ATTENDANCE)
+                    ) {
                         load(forceRefresh = false)
                     }
                 }
@@ -195,7 +199,7 @@ class DaywiseViewModel
                             isOffline = offline,
                         )
                     }
-                    if (forceRefresh) refreshSignal.emit(RefreshTrigger.ATTENDANCE)
+                    if (forceRefresh) refreshSignal.emit(RefreshTrigger.ATTENDANCE, refreshSourceId)
                 } catch (e: Exception) {
                     _state.update { it.copy(isLoading = false, isRefreshing = false, error = ErrorText.forData(e)) }
                 }

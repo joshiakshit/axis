@@ -8,20 +8,20 @@ import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
 import com.ash.axis.data.repository.SELECTED_SEMESTER_CLASS_KEY
 import com.ash.axis.data.repository.SELECTED_SEMESTER_YEAR_KEY
+import com.ash.axis.data.repository.StudentMarkerRepository
 import com.ash.axis.data.repository.TimetableRepository
+import com.ash.axis.domain.model.StudentMarker
+import com.ash.axis.domain.model.StudentMarkerType
 import com.ash.axis.domain.model.TimetableSlot
 import com.ash.axis.domain.model.UserInfo
+import com.ash.axis.domain.model.markerNoClassDates
 import com.ash.axis.domain.usecase.AttendanceTone
 import com.ash.axis.domain.usecase.AttendanceUseCase
-import com.ash.axis.domain.usecase.DaySafety
-import com.ash.axis.domain.usecase.ForecastRow
-import com.ash.axis.domain.usecase.ForecastUseCase
 import com.ash.axis.domain.usecase.PlannerSubject
 import com.ash.axis.domain.usecase.PlannerUseCase
 import com.ash.axis.domain.usecase.ProjectedSubject
 import com.ash.axis.domain.usecase.SubjectAttendance
 import com.ash.axis.domain.usecase.TimetableUseCase
-import com.ash.axis.domain.usecase.TomorrowClass
 import com.ash.axis.ui.ErrorText
 import com.ash.core.network.NetworkMonitor
 import com.ash.core.storage.PreferencesStore
@@ -62,15 +62,13 @@ data class PlannerUiState(
     val timetable: ImmutableMap<String, ImmutableList<TimetableSlot>> = persistentMapOf(),
     // Real per-date future timetable used to decide which days are selectable in the simulator.
     val dateTimetable: ImmutableMap<LocalDate, ImmutableList<TimetableSlot>> = persistentMapOf(),
-    val daySafety: ImmutableList<DaySafety> = persistentListOf(),
-    val forecast: ImmutableList<ForecastRow> = persistentListOf(),
     val selectedDates: ImmutableSet<LocalDate> = persistentSetOf(),
     val holidays: ImmutableSet<LocalDate> = persistentSetOf(),
+    val markers: ImmutableList<StudentMarker> = persistentListOf(),
     val holidayMode: Boolean = false,
     val anchorDate: LocalDate? = null,
     val projected: ImmutableList<ProjectedSubject> = persistentListOf(),
     val totalSpare: Int = 0,
-    val tomorrowSlots: ImmutableList<TomorrowClass> = persistentListOf(),
     val isRefreshing: Boolean = false,
     val simulatorMonth: LocalDate = LocalDate.now().withDayOfMonth(1),
     val semesterEndSet: Boolean = false,
@@ -81,35 +79,47 @@ data class PlannerUiState(
 @Suppress("TooGenericExceptionCaught")
 class PlannerViewModel
     @Inject
+    @Suppress("LongParameterList")
     constructor(
         private val attendanceRepo: AttendanceRepository,
         private val timetableRepo: TimetableRepository,
         private val authRepository: AuthRepository,
+        private val markerRepository: StudentMarkerRepository,
         private val attendanceUseCase: AttendanceUseCase,
         private val plannerUseCase: PlannerUseCase,
-        private val forecastUseCase: ForecastUseCase,
         private val timetableUseCase: TimetableUseCase,
         private val preferencesStore: PreferencesStore,
         private val networkMonitor: NetworkMonitor,
         private val refreshSignal: DataRefreshSignal,
     ) : ViewModel() {
+        private val refreshSourceId = DataRefreshSignal.newSourceId()
+
         private val _state = MutableStateFlow(PlannerUiState())
         val state: StateFlow<PlannerUiState> = _state.asStateFlow()
 
-        private val displayDays = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-
         private var loadJob: Job? = null
+        private var markerJob: Job? = null
+        private var markerOwnerId: String? = null
         private var cachedAcadYear: String = ""
         private var cachedSemesterEnd: LocalDate? = null
         private var dateTimetableCache: Map<LocalDate, List<TimetableSlot>> = emptyMap()
+            set(value) {
+                field = value
+                immutableDateTimetable =
+                    value.mapValues { (_, slots) -> slots.toImmutableList() }.toImmutableMap()
+            }
+        private var immutableDateTimetable: ImmutableMap<LocalDate, ImmutableList<TimetableSlot>> =
+            persistentMapOf()
         private var dateTimetableRange: Pair<LocalDate, LocalDate>? = null
 
         init {
             load(forceRefresh = false)
             observePreferences()
             viewModelScope.launch {
-                refreshSignal.signal.collect { trigger ->
-                    if (trigger == RefreshTrigger.ALL || trigger == RefreshTrigger.ATTENDANCE) {
+                refreshSignal.signal.collect { event ->
+                    if (event.sourceId != refreshSourceId &&
+                        (event.trigger == RefreshTrigger.ALL || event.trigger == RefreshTrigger.ATTENDANCE)
+                    ) {
                         load(forceRefresh = false)
                     }
                 }
@@ -170,8 +180,14 @@ class PlannerViewModel
 
         private suspend fun recomputeProjection(base: PlannerUiState): PlannerUiState {
             val today = LocalDate.now()
+            val absenceDates = base.selectedDates
+            val noClassDates = base.holidays + markerNoClassDates(base.markers)
             val horizon =
-                listOfNotNull(base.anchorDate, base.selectedDates.maxOrNull()).maxOrNull()
+                listOfNotNull(
+                    base.anchorDate,
+                    absenceDates.filter { !it.isBefore(today) }.maxOrNull(),
+                    noClassDates.filter { !it.isBefore(today) }.maxOrNull(),
+                ).maxOrNull()
                     ?: return base.copy(projected = persistentListOf())
 
             val cachedRange = dateTimetableRange
@@ -180,21 +196,22 @@ class PlannerViewModel
             }
 
             val projectionData =
-                dateTimetableCache.filterKeys { it in today..horizon && it !in base.holidays }
+                dateTimetableCache.filterKeys { it in today..horizon && it !in noClassDates }
             val projected =
                 withContext(Dispatchers.Default) {
                     val raw =
                         plannerUseCase.computeProjected(
                             base.subjects,
-                            base.selectedDates,
+                            absenceDates,
                             projectionData,
                             base.threshold,
                             cachedSemesterEnd,
                             base.timetable,
                             today,
                             includeNoAbsence = true,
+                            noClassDates = noClassDates,
                         )
-                    val focusDate = base.anchorDate ?: base.selectedDates.maxOrNull()
+                    val focusDate = base.anchorDate ?: absenceDates.maxOrNull()
                     val dayKey = focusDate?.let { DAY_NAMES[it.dayOfWeek] }
                     val daySlotCodes =
                         if (dayKey != null) {
@@ -209,7 +226,7 @@ class PlannerViewModel
                             .thenBy { it.delta },
                     ).toImmutableList()
                 }
-            return base.copy(projected = projected, dateTimetable = immutableDateTimetable())
+            return base.copy(projected = projected, dateTimetable = immutableDateTimetable)
         }
 
         fun setSemesterEndDate(dateStr: String) {
@@ -229,12 +246,32 @@ class PlannerViewModel
             }
         }
 
+        fun addMarker(
+            title: String,
+            type: StudentMarkerType,
+            startDate: LocalDate,
+            endDate: LocalDate,
+        ) {
+            val ownerId = markerOwnerId ?: return
+            if (title.isBlank()) return
+            viewModelScope.launch {
+                markerRepository.add(ownerId, title, type, startDate, endDate)
+            }
+        }
+
+        fun deleteMarker(markerId: Long) {
+            val ownerId = markerOwnerId ?: return
+            viewModelScope.launch {
+                markerRepository.delete(ownerId, markerId)
+            }
+        }
+
         fun shiftSimulatorMonth(delta: Int) {
             val newMonth = _state.value.simulatorMonth.plusMonths(delta.toLong())
             _state.update { it.copy(simulatorMonth = newMonth) }
             viewModelScope.launch {
                 ensureDateCoverage(newMonth.withDayOfMonth(newMonth.lengthOfMonth()))
-                _state.update { it.copy(dateTimetable = immutableDateTimetable()) }
+                _state.update { it.copy(dateTimetable = immutableDateTimetable) }
             }
         }
 
@@ -245,11 +282,6 @@ class PlannerViewModel
                 fetchDateTimetable(LocalDate.now(), maxOf(end, range?.second ?: end))
             }
         }
-
-        private fun immutableDateTimetable(): ImmutableMap<LocalDate, ImmutableList<TimetableSlot>> =
-            dateTimetableCache
-                .mapValues { (_, slots) -> slots.toImmutableList() }
-                .toImmutableMap()
 
         @Suppress("LongMethod")
         private fun load(forceRefresh: Boolean) {
@@ -316,29 +348,14 @@ class PlannerViewModel
                                 val plannerSubjects =
                                     plannerUseCase.buildPlannerSubjects(rawSubjects, timetable, threshold)
                                         .sortedWith(compareBy<PlannerSubject> { it.tone.ordinal }.thenBy { it.name })
-                                val daySafety =
-                                    displayDays.map { day ->
-                                        plannerUseCase.analyzeDaySafety(day, plannerSubjects, timetable)
-                                    }
                                 val totalSpare =
                                     plannerSubjects
                                         .filter { it.tone != AttendanceTone.BAD }
                                         .sumOf { it.bunkable }
-                                val forecast =
-                                    forecastUseCase.buildForecast(rawSubjects, timetable, threshold, cachedSemesterEnd)
-                                PlannerComputed(plannerSubjects, daySafety, totalSpare, forecast)
+                                PlannerComputed(plannerSubjects, totalSpare)
                             }
 
                         val today = LocalDate.now()
-                        val tomorrow = today.plusDays(1)
-                        val tomorrowDayKey = DAY_NAMES[tomorrow.dayOfWeek] ?: ""
-                        val tomorrowClasses =
-                            plannerUseCase.buildTomorrowClasses(
-                                timetable[tomorrowDayKey] ?: emptyList(),
-                                computed.subjects,
-                                threshold,
-                            )
-
                         val cacheEnd = today.plusWeeks(4)
                         primeDateTimetableCache(user, semester.yearId, today to cacheEnd, timetable, forceRefresh)
 
@@ -355,11 +372,8 @@ class PlannerViewModel
                                 overallTotal = attendance.endrow.total,
                                 subjects = computed.subjects.toImmutableList(),
                                 timetable = immutableTimetable,
-                                dateTimetable = immutableDateTimetable(),
-                                daySafety = computed.daySafety.toImmutableList(),
+                                dateTimetable = immutableDateTimetable,
                                 totalSpare = computed.totalSpare,
-                                tomorrowSlots = tomorrowClasses.toImmutableList(),
-                                forecast = computed.forecast.toImmutableList(),
                                 selectedDates = persistentSetOf(),
                                 anchorDate = null,
                                 projected = persistentListOf(),
@@ -367,12 +381,26 @@ class PlannerViewModel
                                 isOffline = offline,
                             )
                         }
-                        if (forceRefresh) refreshSignal.emit(RefreshTrigger.ATTENDANCE)
+                        observeMarkers(user.admno)
+                        if (forceRefresh) refreshSignal.emit(RefreshTrigger.ATTENDANCE, refreshSourceId)
                     } catch (e: Exception) {
                         val offline = networkMonitor.isOnline.first().not()
                         _state.update {
                             it.copy(isLoading = false, isRefreshing = false, error = ErrorText.forData(e), isOffline = offline)
                         }
+                    }
+                }
+        }
+
+        private fun observeMarkers(ownerId: String) {
+            if (markerOwnerId == ownerId) return
+            markerOwnerId = ownerId
+            markerJob?.cancel()
+            markerJob =
+                viewModelScope.launch {
+                    markerRepository.observe(ownerId).collect { markers ->
+                        val base = _state.value.copy(markers = markers.toImmutableList())
+                        _state.value = recomputeProjection(base)
                     }
                 }
         }
@@ -478,9 +506,7 @@ class PlannerViewModel
 
         private data class PlannerComputed(
             val subjects: List<PlannerSubject>,
-            val daySafety: List<DaySafety>,
             val totalSpare: Int,
-            val forecast: List<ForecastRow>,
         )
 
         private companion object {

@@ -96,6 +96,8 @@ class DashboardViewModel
         private val networkMonitor: NetworkMonitor,
         private val refreshSignal: DataRefreshSignal,
     ) : ViewModel() {
+        private val refreshSourceId = DataRefreshSignal.newSourceId()
+
         private val _state = MutableStateFlow(DashboardUiState())
         val state: StateFlow<DashboardUiState> = _state.asStateFlow()
 
@@ -105,8 +107,10 @@ class DashboardViewModel
             loadDashboard(forceRefresh = false)
             observeSemesterSelection()
             viewModelScope.launch {
-                refreshSignal.signal.collect { trigger ->
-                    if (trigger == RefreshTrigger.ALL || trigger == RefreshTrigger.ATTENDANCE) {
+                refreshSignal.signal.collect { event ->
+                    if (event.sourceId != refreshSourceId &&
+                        (event.trigger == RefreshTrigger.ALL || event.trigger == RefreshTrigger.ATTENDANCE)
+                    ) {
                         loadDashboard(forceRefresh = false)
                     }
                 }
@@ -240,7 +244,7 @@ class DashboardViewModel
 
                         val offline = networkMonitor.isOnline.first().not()
                         _state.update { computed.copy(isOffline = offline) }
-                        if (forceRefresh) refreshSignal.emit(RefreshTrigger.ALL)
+                        if (forceRefresh) refreshSignal.emit(RefreshTrigger.ALL, refreshSourceId)
                     } catch (e: Exception) {
                         _state.update { it.copy(isLoading = false, isRefreshing = false, error = ErrorText.forData(e)) }
                     }

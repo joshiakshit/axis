@@ -19,12 +19,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,6 +42,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ash.axis.domain.model.StudentMarker
+import com.ash.axis.domain.model.StudentMarkerType
 import com.ash.axis.domain.model.TimetableSlot
 import com.ash.core.ui.theme.AppShapes
 import com.ash.core.ui.theme.cardColor
@@ -48,34 +54,56 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
+private val monthTitleFormatter = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.ENGLISH)
+private val dateLabelFormatter = DateTimeFormatter.ofPattern("EEEE, dd MMM", Locale.ENGLISH)
+private val dayNames = listOf("M", "T", "W", "T", "F", "S", "S")
+
+private fun simulatorWeeks(monthStart: LocalDate): List<List<LocalDate?>> =
+    buildList<LocalDate?> {
+        repeat(monthStart.dayOfWeek.value - 1) { add(null) }
+        for (day in 1..monthStart.lengthOfMonth()) add(monthStart.withDayOfMonth(day))
+        while (size % 7 != 0) add(null)
+    }.chunked(7)
+
+private fun markerTypesByDate(
+    markers: List<StudentMarker>,
+    monthStart: LocalDate,
+): Map<LocalDate, Set<StudentMarkerType>> {
+    val monthEnd = monthStart.withDayOfMonth(monthStart.lengthOfMonth())
+    val byDate = mutableMapOf<LocalDate, MutableSet<StudentMarkerType>>()
+    markers.forEach { marker ->
+        var date = maxOf(marker.startDate, monthStart)
+        val last = minOf(marker.endDate, monthEnd)
+        while (date <= last) {
+            byDate.getOrPut(date) { mutableSetOf() } += marker.type
+            date = date.plusDays(1)
+        }
+    }
+    return byDate
+}
+
 @Suppress("LongMethod", "CyclomaticComplexMethod", "LongParameterList")
 @Composable
 internal fun SimulatorGrid(
     month: LocalDate,
     selectedDates: ImmutableSet<LocalDate>,
     holidays: ImmutableSet<LocalDate>,
+    markers: ImmutableList<StudentMarker>,
+    holidayMode: Boolean,
     anchorDate: LocalDate?,
     dateTimetable: ImmutableMap<LocalDate, ImmutableList<TimetableSlot>>,
     onPreview: (LocalDate) -> Unit,
     onMarkAbsent: (LocalDate) -> Unit,
     onShiftMonth: (Int) -> Unit,
+    onToggleHolidayMode: () -> Unit,
+    onClear: () -> Unit,
 ) {
-    val today = LocalDate.now()
+    val today = remember { LocalDate.now() }
     val monthStart = month.withDayOfMonth(1)
-    val monthTitle = monthStart.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.ENGLISH))
-    val cellDates =
-        buildList {
-            val firstOffset = monthStart.dayOfWeek.value - 1
-            repeat(firstOffset) { add(null) }
-            for (day in 1..monthStart.lengthOfMonth()) {
-                add(monthStart.withDayOfMonth(day))
-            }
-            while (size % 7 != 0) add(null)
-        }
-    val weeks = cellDates.chunked(7)
-
-    val dayNames = listOf("M", "T", "W", "T", "F", "S", "S")
-    val dateLabelFormatter = DateTimeFormatter.ofPattern("EEEE, dd MMM")
+    val monthTitle = remember(monthStart) { monthStart.format(monthTitleFormatter) }
+    val weeks = remember(monthStart) { simulatorWeeks(monthStart) }
+    // One pass over the markers here beats filtering the whole list inside all 42 day cells.
+    val markersByDate = remember(markers, monthStart) { markerTypesByDate(markers, monthStart) }
 
     Surface(
         shape = AppShapes.medium,
@@ -101,6 +129,14 @@ internal fun SimulatorGrid(
                     )
                 }
             }
+            SimulatorControls(
+                holidayMode = holidayMode,
+                selectedCount = selectedDates.size,
+                noClassCount = holidays.size,
+                hasPreview = anchorDate != null,
+                onToggleHolidayMode = onToggleHolidayMode,
+                onClear = onClear,
+            )
             Spacer(Modifier.height(6.dp))
             Row(modifier = Modifier.fillMaxWidth()) {
                 dayNames.forEach { name ->
@@ -127,9 +163,9 @@ internal fun SimulatorGrid(
                                 today = today,
                                 selectedDates = selectedDates,
                                 holidays = holidays,
+                                markerTypes = markersByDate[date].orEmpty(),
                                 anchorDate = anchorDate,
                                 dateTimetable = dateTimetable,
-                                dateLabelFormatter = dateLabelFormatter,
                                 onPreview = onPreview,
                                 onMarkAbsent = onMarkAbsent,
                                 modifier = Modifier.weight(1f),
@@ -142,6 +178,64 @@ internal fun SimulatorGrid(
     }
 }
 
+@Composable
+private fun SimulatorControls(
+    holidayMode: Boolean,
+    selectedCount: Int,
+    noClassCount: Int,
+    hasPreview: Boolean,
+    onToggleHolidayMode: () -> Unit,
+    onClear: () -> Unit,
+) {
+    val hasSelection = selectedCount > 0 || noClassCount > 0 || hasPreview
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        FilterChip(
+            selected = !holidayMode,
+            onClick = { if (holidayMode) onToggleHolidayMode() },
+            label = { Text("Skip", fontSize = 12.sp) },
+            colors =
+                FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.errorContainer,
+                    selectedLabelColor = MaterialTheme.colorScheme.onErrorContainer,
+                ),
+        )
+        FilterChip(
+            selected = holidayMode,
+            onClick = { if (!holidayMode) onToggleHolidayMode() },
+            label = { Text("No class", fontSize = 12.sp) },
+            colors =
+                FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    selectedLabelColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                ),
+        )
+        Spacer(Modifier.weight(1f))
+        if (hasSelection) {
+            TextButton(onClick = onClear) { Text("Clear") }
+        }
+    }
+    Text(
+        when {
+            selectedCount > 0 || noClassCount > 0 ->
+                buildString {
+                    if (selectedCount > 0) append("$selectedCount skipped")
+                    if (noClassCount > 0) {
+                        if (isNotEmpty()) append(" · ")
+                        append("$noClassCount no-class")
+                    }
+                }
+            hasPreview -> "Previewing attendance through the selected day"
+            else -> "Tap class days to simulate. Hold a day to preview."
+        },
+        fontSize = 11.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Suppress("LongMethod", "LongParameterList", "CyclomaticComplexMethod", "ComplexCondition")
 @Composable
@@ -150,9 +244,9 @@ private fun SimulatorDayCell(
     today: LocalDate,
     selectedDates: ImmutableSet<LocalDate>,
     holidays: ImmutableSet<LocalDate>,
+    markerTypes: Set<StudentMarkerType>,
     anchorDate: LocalDate?,
     dateTimetable: ImmutableMap<LocalDate, ImmutableList<TimetableSlot>>,
-    dateLabelFormatter: DateTimeFormatter,
     onPreview: (LocalDate) -> Unit,
     onMarkAbsent: (LocalDate) -> Unit,
     modifier: Modifier = Modifier,
@@ -189,7 +283,7 @@ private fun SimulatorDayCell(
             isToday && !isSelected && !isHoliday -> MaterialTheme.colorScheme.primary
             else -> Color.Transparent
         }
-    val label =
+    val label = {
         buildString {
             append(date.format(dateLabelFormatter))
             if (isToday) append(", today")
@@ -200,9 +294,11 @@ private fun SimulatorDayCell(
             } else if (isAnchor) {
                 append(", preview selected")
             }
+            markerTypes.forEach { append(", ${it.label.lowercase()}") }
             if (hasClasses) append(", has classes") else append(", no classes")
             if (!isPast && hasClasses) append(", tap to mark, long press to preview")
         }
+    }
 
     Box(
         modifier =
@@ -222,9 +318,9 @@ private fun SimulatorDayCell(
                                     onPreview(date)
                                 },
                             )
-                            .semantics { contentDescription = label }
+                            .semantics { contentDescription = label() }
                     } else {
-                        Modifier.semantics { contentDescription = label }
+                        Modifier.semantics { contentDescription = label() }
                     },
                 ),
         contentAlignment = Alignment.Center,
@@ -236,13 +332,30 @@ private fun SimulatorDayCell(
                 fontWeight = if (isToday || isSelected || isAnchor) FontWeight.Bold else FontWeight.Normal,
                 color = textColor,
             )
-            if (hasClasses && !isPast && !isSelected && !isHoliday && !isAnchor) {
-                Box(
-                    modifier =
-                        Modifier.size(3.dp).clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary),
-                )
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                if (hasClasses && !isPast && !isSelected && !isHoliday && !isAnchor) {
+                    MarkerDot(MaterialTheme.colorScheme.primary)
+                }
+                markerTypes.forEach { type -> MarkerDot(markerColor(type)) }
             }
         }
     }
+}
+
+@Composable
+private fun markerColor(type: StudentMarkerType): Color =
+    when (type) {
+        StudentMarkerType.EXAM -> MaterialTheme.colorScheme.error
+        StudentMarkerType.HOLIDAY -> MaterialTheme.colorScheme.tertiary
+    }
+
+@Composable
+private fun MarkerDot(color: Color) {
+    Box(
+        modifier =
+            Modifier
+                .size(3.dp)
+                .clip(CircleShape)
+                .background(color),
+    )
 }

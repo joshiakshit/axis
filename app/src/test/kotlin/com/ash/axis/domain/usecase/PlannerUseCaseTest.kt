@@ -301,4 +301,44 @@ class PlannerUseCaseTest {
         assertTrue(result.isNotEmpty())
         assertEquals(2, result.first().absencesPlanned)
     }
+
+    @Test
+    fun `no class dates do not count as planned absences`() {
+        val plannerSubjects = plannerUseCase.buildPlannerSubjects(subjects, timetable, 75)
+        val nextMonday = nextDayOfWeek(DayOfWeek.MONDAY)
+        val dateTimetable = buildDateTimetable(nextMonday)
+
+        val result =
+            plannerUseCase.computeProjected(
+                plannerSubjects,
+                setOf(nextMonday),
+                dateTimetable,
+                75,
+                noClassDates = setOf(nextMonday),
+            )
+
+        assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun `no class dates are excluded from maximum reachable attendance`() {
+        val plannerSubjects = plannerUseCase.buildPlannerSubjects(subjects, timetable, 75)
+        val nextMonday = nextDayOfWeek(DayOfWeek.MONDAY)
+        val dateTimetable = buildDateTimetable(nextMonday)
+
+        val result =
+            plannerUseCase.computeProjected(
+                plannerSubjects,
+                setOf(nextMonday),
+                dateTimetable,
+                75,
+                semesterEnd = nextMonday.plusDays(7),
+                weeklyTimetable = timetable,
+                today = nextMonday,
+                noClassDates = setOf(nextMonday.plusDays(7)),
+            )
+
+        val math = result.find { it.code == "CS101" }!!
+        assertEquals(81.0 * 100.0 / 102.0, math.maxReachable!!, 0.01)
+    }
 }
