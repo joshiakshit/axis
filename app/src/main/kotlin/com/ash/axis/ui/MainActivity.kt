@@ -1,9 +1,13 @@
 package com.ash.axis.ui
 
 import android.content.Intent
+import android.graphics.Color
 import android.os.Bundle
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -105,6 +109,21 @@ class MainActivity : FragmentActivity() {
                     profileName = colorProfile,
                     accentHex = accentColor,
                 )
+
+            // enableEdgeToEdge() defaults to the system night setting, so a Light app on a Dark phone
+            // drew white status bar icons onto a light background. Follow the app's own theme instead.
+            val darkTheme =
+                when (themeState.mode) {
+                    ThemeMode.DARK -> true
+                    ThemeMode.LIGHT -> false
+                    ThemeMode.SYSTEM -> isSystemInDarkTheme()
+                }
+            LaunchedEffect(darkTheme) {
+                enableEdgeToEdge(
+                    statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { darkTheme },
+                    navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { darkTheme },
+                )
+            }
 
             AppTheme(themeState = themeState) {
                 if (!splashDone) {
