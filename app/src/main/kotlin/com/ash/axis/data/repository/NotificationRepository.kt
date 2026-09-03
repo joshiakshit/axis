@@ -58,16 +58,17 @@ class NotificationRepository
 
         private fun parseNotifications(raw: String): List<AppNotification> {
             val element = json.parseToJsonElement(raw)
-            val array = when (element) {
-                is JsonArray -> element
-                is JsonObject -> {
-                    element["data"] as? JsonArray
-                        ?: element["notifications"] as? JsonArray
-                        ?: element["result"] as? JsonArray
-                        ?: return emptyList()
+            val array =
+                when (element) {
+                    is JsonArray -> element
+                    is JsonObject -> {
+                        element["data"] as? JsonArray
+                            ?: element["notifications"] as? JsonArray
+                            ?: element["result"] as? JsonArray
+                            ?: return emptyList()
+                    }
+                    else -> return emptyList()
                 }
-                else -> return emptyList()
-            }
             return array.mapNotNull { item ->
                 runCatching { json.decodeFromJsonElement(AppNotification.serializer(), item) }.getOrNull()
             }

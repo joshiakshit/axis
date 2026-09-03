@@ -41,9 +41,10 @@ class CalendarRepository
             }
 
             return try {
-                val response = authApi.getHolidays(
-                    mapOf("br_id" to brId.toString(), "acadyr" to acadYear),
-                )
+                val response =
+                    authApi.getHolidays(
+                        mapOf("br_id" to brId.toString(), "acadyr" to acadYear),
+                    )
                 val body = response.body()?.string()?.trim() ?: return emptyList()
                 val holidays = parseHolidays(body)
                 cacheDao.put(CacheEntity(key = key, data = json.encodeToString(holidayListSerializer, holidays)))
@@ -61,16 +62,17 @@ class CalendarRepository
 
         private fun parseHolidays(raw: String): List<Holiday> {
             val element = json.parseToJsonElement(raw)
-            val array = when (element) {
-                is JsonArray -> element
-                is JsonObject -> {
-                    element["data"] as? JsonArray
-                        ?: element["holidays"] as? JsonArray
-                        ?: element["result"] as? JsonArray
-                        ?: return emptyList()
+            val array =
+                when (element) {
+                    is JsonArray -> element
+                    is JsonObject -> {
+                        element["data"] as? JsonArray
+                            ?: element["holidays"] as? JsonArray
+                            ?: element["result"] as? JsonArray
+                            ?: return emptyList()
+                    }
+                    else -> return emptyList()
                 }
-                else -> return emptyList()
-            }
             return array.mapNotNull { item ->
                 runCatching { json.decodeFromJsonElement(Holiday.serializer(), item) }.getOrNull()
             }.filter { it.date.isNotBlank() && it.name.isNotBlank() }

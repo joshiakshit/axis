@@ -458,11 +458,12 @@ class GradesViewModel
                 }
                 try {
                     val user = authRepository.getUserInfo() ?: error("Not logged in")
-                    val entries = gradesRepo.getAdmitCard(
-                        admno = user.admno,
-                        brId = user.brId,
-                        forceRefresh = forceRefresh,
-                    )
+                    val entries =
+                        gradesRepo.getAdmitCard(
+                            admno = user.admno,
+                            brId = user.brId,
+                            forceRefresh = forceRefresh,
+                        )
                     _state.update {
                         it.copy(
                             admitCardLoading = false,

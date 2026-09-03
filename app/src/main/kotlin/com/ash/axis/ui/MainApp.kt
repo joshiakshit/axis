@@ -30,9 +30,9 @@ import com.ash.axis.ui.academics.AcademicsScreen
 import com.ash.axis.ui.account.AccountSwitcherSheet
 import com.ash.axis.ui.dashboard.DashboardScreen
 import com.ash.axis.ui.grades.GradesScreen
+import com.ash.axis.ui.notifications.NotificationsScreen
 import com.ash.axis.ui.qr.QrScanFlow
 import com.ash.axis.ui.qr.QrScanViewModel
-import com.ash.axis.ui.notifications.NotificationsScreen
 import com.ash.axis.ui.settings.AdminScreen
 import com.ash.axis.ui.settings.SettingsScreen
 import com.ash.axis.ui.timetable.TimetableScreen
