@@ -3,10 +3,12 @@
 # One-command release: bump the version, build the signed APK, upload it to the Axis Worker (R2), and flip the
 # "latest build" config so every installed app offers the update. No more manual editing.
 #
-#   scripts/release.sh                 # auto-bump patch (1.0.0 -> 1.0.1), advertise as the latest build
-#   scripts/release.sh 1.2.0           # set an explicit versionName, advertise
+# Versioning: 1.MINOR.PATCH. Bump the minor for a feature release, the patch for fixes.
+#
+#   scripts/release.sh                 # auto-bump patch (1.1.0 -> 1.1.1), advertise as the latest build
+#   scripts/release.sh 1.2.0           # set an explicit versionName, e.g. a feature release
 #   scripts/release.sh --force         # ALSO raise the force-update floor (blocks old builds until updated)
-#   scripts/release.sh 2.0.0 --force   # both
+#   scripts/release.sh 1.2.0 --force   # both
 #   scripts/release.sh --check         # run the full test/lint gate before building
 #
 # Requires in local.properties:  REMOTE_CONFIG_URL, ADMIN_TOKEN  (and the RELEASE_* signing keys for a real
