@@ -1,14 +1,17 @@
 package com.ash.axis.data.repository
 
-import android.util.Base64
 import com.ash.axis.data.api.AuthApi
+import com.ash.axis.data.api.UserApi
 import com.ash.axis.data.config.RemoteConfigRepository
 import com.ash.axis.domain.model.JwtPayload
+import com.ash.axis.domain.model.StudentRequestContext
 import com.ash.axis.domain.model.UserInfo
 import com.ash.core.security.TokenManager
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
+import java.time.Duration
+import java.util.Base64
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -23,11 +26,13 @@ class AuthRepository
     @Inject
     constructor(
         private val authApi: AuthApi,
+        private val userApi: UserApi,
         private val tokenManager: TokenManager,
         private val remoteConfig: RemoteConfigRepository,
         private val json: Json,
     ) {
         private val refreshMutex = Mutex()
+        private val profileMutex = Mutex()
 
         suspend fun requestOtp(
             contact: String,
@@ -127,10 +132,42 @@ class AuthRepository
         fun getUserInfo(): UserInfo? {
             val access = tokenManager.getAccessToken() ?: return null
             return try {
-                decodeUserInfo(access)
+                decodeUserInfo(access).copy(academicYear = tokenManager.getAcademicYear().orEmpty())
             } catch (_: Exception) {
                 null
             }
+        }
+
+        suspend fun requireStudentRequestContext(forceProfileRefresh: Boolean = false): StudentRequestContext {
+            val user = getUserInfo() ?: error("Not logged in")
+            if (user.clientId.isBlank()) error("Session did not include a client ID")
+            val observedFetchTime = tokenManager.getAcademicYearFetchedAt()
+            val academicYear =
+                if (!forceProfileRefresh && isProfileFresh(user.academicYear, observedFetchTime)) {
+                    user.academicYear
+                } else {
+                    profileMutex.withLock {
+                        val currentUser = getUserInfo() ?: error("Not logged in")
+                        val cachedYear = currentUser.academicYear
+                        val cachedAt = tokenManager.getAcademicYearFetchedAt()
+                        val refreshedByAnotherRequest =
+                            forceProfileRefresh &&
+                                cachedAt > observedFetchTime &&
+                                cachedYear.isNotBlank()
+                        when {
+                            refreshedByAnotherRequest -> cachedYear
+                            !forceProfileRefresh && isProfileFresh(cachedYear, cachedAt) -> cachedYear
+                            else -> fetchAcademicYear(currentUser, forceProfileRefresh, cachedYear)
+                        }
+                    }
+                }
+
+            return StudentRequestContext(
+                admno = user.admno,
+                brId = user.brId,
+                clientId = user.clientId,
+                academicYear = academicYear,
+            )
         }
 
         fun isLoggedIn(): Boolean = tokenManager.hasTokens()
@@ -142,7 +179,7 @@ class AuthRepository
         private fun decodeUserInfo(accessToken: String): UserInfo {
             val parts = accessToken.split(".")
             require(parts.size >= 2) { "Invalid JWT" }
-            val payload = String(Base64.decode(paddedBase64(parts[1]), Base64.URL_SAFE or Base64.NO_WRAP))
+            val payload = String(Base64.getUrlDecoder().decode(paddedBase64(parts[1])))
             val jwt = json.decodeFromString<JwtPayload>(payload)
             val admno = jwt.admno.ifBlank { jwt.preferredUsername }
             return UserInfo(
@@ -153,6 +190,7 @@ class AuthRepository
                 phoneNumber = jwt.phoneNumber,
                 clientId = jwt.clientId,
                 preferredUsername = jwt.preferredUsername,
+                userType = jwt.userType,
             )
         }
 
@@ -160,7 +198,7 @@ class AuthRepository
             return try {
                 val parts = token.split(".")
                 if (parts.size < 2) return true
-                val payload = String(Base64.decode(paddedBase64(parts[1]), Base64.URL_SAFE or Base64.NO_WRAP))
+                val payload = String(Base64.getUrlDecoder().decode(paddedBase64(parts[1])))
                 val jwt = json.decodeFromString<JwtPayload>(payload)
                 jwt.exp < (System.currentTimeMillis() / 1000) + 60
             } catch (_: Exception) {
@@ -171,6 +209,41 @@ class AuthRepository
         private fun paddedBase64(value: String): String {
             val remainder = value.length % 4
             return if (remainder == 0) value else value + "=".repeat(4 - remainder)
+        }
+
+        @Suppress("TooGenericExceptionCaught")
+        private suspend fun fetchAcademicYear(
+            user: UserInfo,
+            forceProfileRefresh: Boolean,
+            cachedYear: String,
+        ): String {
+            return try {
+                refreshTokenIfNeeded()
+                val academicYear =
+                    userApi.getPersonalDetails(
+                        mapOf(
+                            "code" to user.admno,
+                            "type" to user.userType,
+                        ),
+                    ).data?.result?.academicYear.orEmpty()
+                if (academicYear.isBlank()) error("Personal details did not include an academic year")
+                tokenManager.saveAcademicYear(academicYear, System.currentTimeMillis())
+                academicYear
+            } catch (e: Exception) {
+                if (!forceProfileRefresh && cachedYear.isNotBlank()) cachedYear else throw e
+            }
+        }
+
+        private fun isProfileFresh(
+            academicYear: String,
+            fetchedAt: Long,
+        ): Boolean =
+            academicYear.isNotBlank() &&
+                fetchedAt > 0L &&
+                System.currentTimeMillis() - fetchedAt <= PROFILE_TTL_MS
+
+        private companion object {
+            val PROFILE_TTL_MS: Long = Duration.ofHours(24).toMillis()
         }
     }
 

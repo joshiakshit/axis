@@ -12,8 +12,8 @@ import com.ash.axis.data.repository.StudentMarkerRepository
 import com.ash.axis.data.repository.TimetableRepository
 import com.ash.axis.domain.model.StudentMarker
 import com.ash.axis.domain.model.StudentMarkerType
+import com.ash.axis.domain.model.StudentRequestContext
 import com.ash.axis.domain.model.TimetableSlot
-import com.ash.axis.domain.model.UserInfo
 import com.ash.axis.domain.model.markerNoClassDates
 import com.ash.axis.domain.usecase.AttendanceTone
 import com.ash.axis.domain.usecase.AttendanceUseCase
@@ -105,7 +105,7 @@ class PlannerViewModel
         private var loadJob: Job? = null
         private var markerJob: Job? = null
         private var markerOwnerId: String? = null
-        private var cachedAcadYear: String = ""
+        private var cachedTimetableContext: StudentRequestContext? = null
         private var cachedSemesterEnd: LocalDate? = null
         private var dateTimetableCache: Map<LocalDate, List<TimetableSlot>> = emptyMap()
             set(value) {
@@ -316,6 +316,8 @@ class PlannerViewModel
                                 runCatching { LocalDate.parse(it) }.getOrNull()
                             }
                         val user = authRepository.getUserInfo() ?: error("Not logged in")
+                        val timetableContext =
+                            authRepository.requireStudentRequestContext(forceProfileRefresh = forceRefresh)
                         val selectedYearId = preferencesStore.getUserString(SELECTED_SEMESTER_YEAR_KEY).first()
                         val selectedClassId = preferencesStore.getUserString(SELECTED_SEMESTER_CLASS_KEY).first()
                         val semester =
@@ -326,7 +328,7 @@ class PlannerViewModel
                                 selectedClassId,
                                 forceRefresh,
                             )
-                        cachedAcadYear = semester.yearId
+                        cachedTimetableContext = timetableContext
                         val (weekStart, weekEnd) = timetableUseCase.getCurrentWeekRange()
 
                         val (attendance, timetable) =
@@ -344,9 +346,7 @@ class PlannerViewModel
                                 val timetableDeferred =
                                     async {
                                         timetableRepo.getTimetable(
-                                            user.admno,
-                                            user.brId,
-                                            semester.yearId,
+                                            timetableContext,
                                             weekStart.toString(),
                                             weekEnd.toString(),
                                             forceRefresh,
@@ -375,7 +375,7 @@ class PlannerViewModel
 
                         val today = LocalDate.now()
                         val cacheEnd = today.plusWeeks(4)
-                        primeDateTimetableCache(user, semester.yearId, today to cacheEnd, timetable, forceRefresh)
+                        primeDateTimetableCache(timetableContext, today to cacheEnd, timetable, forceRefresh)
                         val todayHasClasses = dateTimetableCache[today].orEmpty().isNotEmpty()
                         val savedTodayDate = preferencesStore.getUserString(TODAY_ATTENDANCE_DATE_KEY).first()
                         val savedTodayStatus = preferencesStore.getUserString(TODAY_ATTENDANCE_STATUS_KEY).first()
@@ -460,10 +460,9 @@ class PlannerViewModel
             val weekly = _state.value.timetable
             val apiData =
                 try {
-                    val user = authRepository.getUserInfo()
-                    if (user != null) {
-                        val acadYear = cachedAcadYear.ifBlank { timetableUseCase.getAcadYear() }
-                        fetchDateKeyedRange(user.admno, user.brId, acadYear, start, end, forceRefresh = false)
+                    val context = cachedTimetableContext ?: authRepository.requireStudentRequestContext()
+                    if (context.admno.isNotBlank()) {
+                        fetchDateKeyedRange(context, start, end, forceRefresh = false)
                     } else {
                         emptyMap()
                     }
@@ -475,8 +474,7 @@ class PlannerViewModel
         }
 
         private suspend fun primeDateTimetableCache(
-            user: UserInfo,
-            acadYear: String,
+            context: StudentRequestContext,
             range: Pair<LocalDate, LocalDate>,
             weekly: Map<String, List<TimetableSlot>>,
             forceRefresh: Boolean,
@@ -484,7 +482,7 @@ class PlannerViewModel
             val (start, end) = range
             val apiData =
                 runCatching {
-                    fetchDateKeyedRange(user.admno, user.brId, acadYear, start, end, forceRefresh)
+                    fetchDateKeyedRange(context, start, end, forceRefresh)
                 }.getOrDefault(emptyMap())
 
             dateTimetableCache = mergeWithWeeklyFallback(apiData, weekly, start, end)
@@ -494,9 +492,7 @@ class PlannerViewModel
         // The timetable endpoint serves one Mon–Sun week per request, so a single wide-range call only
         // returns one week. Fetch every week that overlaps [start, end] in parallel and merge them.
         private suspend fun fetchDateKeyedRange(
-            admno: String,
-            brId: Int,
-            acadYear: String,
+            context: StudentRequestContext,
             start: LocalDate,
             end: LocalDate,
             forceRefresh: Boolean,
@@ -511,9 +507,7 @@ class PlannerViewModel
                         async {
                             runCatching {
                                 timetableRepo.getDateKeyedTimetable(
-                                    admno,
-                                    brId,
-                                    acadYear,
+                                    context,
                                     weekStart.toString(),
                                     weekStart.plusDays(6).toString(),
                                     forceRefresh,

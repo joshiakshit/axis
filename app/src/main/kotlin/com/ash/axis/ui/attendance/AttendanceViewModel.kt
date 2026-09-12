@@ -115,6 +115,8 @@ class AttendanceViewModel
                 _state.update { it.copy(isRefreshing = forceRefresh, isLoading = !forceRefresh && it.subjects.isEmpty()) }
                 try {
                     val user = authRepository.getUserInfo() ?: error("Not logged in")
+                    val timetableContext =
+                        authRepository.requireStudentRequestContext(forceProfileRefresh = forceRefresh)
                     val semester = selectedSemester(user, forceRefresh)
                     val (weekStart, weekEnd) = timetableUseCase.getCurrentWeekRange()
 
@@ -133,9 +135,7 @@ class AttendanceViewModel
                             val timetableDeferred =
                                 async {
                                     timetableRepo.getTimetable(
-                                        user.admno,
-                                        user.brId,
-                                        semester.yearId,
+                                        timetableContext,
                                         weekStart.toString(),
                                         weekEnd.toString(),
                                         forceRefresh,

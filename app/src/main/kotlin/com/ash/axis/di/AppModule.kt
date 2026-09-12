@@ -8,6 +8,7 @@ import com.ash.axis.data.api.AxisBackendApi
 import com.ash.axis.data.api.ICloudEmsApi
 import com.ash.axis.data.api.QrAttendanceApi
 import com.ash.axis.data.api.RemoteConfigApi
+import com.ash.axis.data.api.UserApi
 import com.ash.axis.data.config.RemoteConfigRepository
 import com.ash.axis.data.db.AppDatabase
 import com.ash.axis.data.db.CacheDao
@@ -160,6 +161,12 @@ object AppModule {
     fun provideQrAttendanceApi(
         @Named("qr") retrofit: Retrofit,
     ): QrAttendanceApi = retrofit.create(QrAttendanceApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideUserApi(
+        @Named("qr") retrofit: Retrofit,
+    ): UserApi = retrofit.create(UserApi::class.java)
 
     @Provides
     @Singleton

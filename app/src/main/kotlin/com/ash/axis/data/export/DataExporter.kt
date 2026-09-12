@@ -68,23 +68,14 @@ class DataExporter
         }
 
         private suspend fun loadViewWeek(): ViewWeek {
-            val user = authRepository.getUserInfo() ?: error("Not logged in")
+            val context = authRepository.requireStudentRequestContext()
             val viewDate =
                 parseDate(preferencesStore.getUserString(ExportKeys.TIMETABLE_VIEW_DATE, "").first()) ?: LocalDate.now()
             val weekStart = viewDate.with(DayOfWeek.MONDAY)
             val weekEnd = weekStart.plusDays(6)
-            val yearId = preferencesStore.getUserString(SELECTED_SEMESTER_YEAR_KEY).first()
-            val classId = preferencesStore.getUserString(SELECTED_SEMESTER_CLASS_KEY).first()
-            val year =
-                runCatching { attendanceRepo.getPreferredSemester(user.admno, user.brId, yearId, classId, false).yearId }
-                    .getOrNull()
-                    ?.takeIf { it.isNotBlank() }
-                    ?: timetableUseCase.getAcadYear()
             val week =
                 timetableRepo.getDateKeyedTimetable(
-                    admno = user.admno,
-                    brId = user.brId,
-                    acadYear = year,
+                    context = context,
                     startDate = weekStart.toString(),
                     endDate = weekEnd.toString(),
                     forceRefresh = false,

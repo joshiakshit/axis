@@ -5,14 +5,11 @@ import androidx.lifecycle.viewModelScope
 import com.ash.axis.data.DataRefreshSignal
 import com.ash.axis.data.RefreshTrigger
 import com.ash.axis.data.export.ExportKeys
-import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
 import com.ash.axis.data.repository.CalendarRepository
-import com.ash.axis.data.repository.SELECTED_SEMESTER_CLASS_KEY
-import com.ash.axis.data.repository.SELECTED_SEMESTER_YEAR_KEY
 import com.ash.axis.data.repository.TimetableRepository
+import com.ash.axis.domain.model.StudentRequestContext
 import com.ash.axis.domain.model.TimetableSlot
-import com.ash.axis.domain.model.UserInfo
 import com.ash.axis.domain.usecase.TimetableUseCase
 import com.ash.axis.ui.ErrorText
 import com.ash.core.network.NetworkMonitor
@@ -31,8 +28,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -87,7 +82,6 @@ class TimetableViewModel
     @Inject
     constructor(
         private val timetableRepo: TimetableRepository,
-        private val attendanceRepo: AttendanceRepository,
         private val authRepository: AuthRepository,
         private val calendarRepo: CalendarRepository,
         private val timetableUseCase: TimetableUseCase,
@@ -110,7 +104,6 @@ class TimetableViewModel
             val today = LocalDate.now()
             _state.update { it.copy(anchorDate = today, currentDate = today) }
             ensureWeekInternal(today, forceRefresh = false, isInitial = true)
-            observeSemesterSelection()
             startProgressTicker()
             loadHolidays()
             viewModelScope.launch {
@@ -162,7 +155,8 @@ class TimetableViewModel
             viewModelScope.launch {
                 _state.update { it.copy(isRefreshing = true) }
                 try {
-                    loadWeek(ws, forceRefresh = true)
+                    val context = authRepository.requireStudentRequestContext(forceProfileRefresh = true)
+                    loadWeek(ws, context, forceRefresh = true)
                     refreshSignal.emit(RefreshTrigger.TIMETABLE, refreshSourceId)
                 } catch (e: Exception) {
                     val offline = networkMonitor.isOnline.first().not()
@@ -202,12 +196,12 @@ class TimetableViewModel
 
             viewModelScope.launch {
                 try {
+                    val context = authRepository.requireStudentRequestContext(forceProfileRefresh = forceRefresh)
                     var showedCache = false
-                    val user = authRepository.getUserInfo()
-                    if (!forceRefresh && user != null) {
+                    if (!forceRefresh) {
                         val peek =
                             runCatching {
-                                timetableRepo.peekTimetable(user.admno, ws.toString(), ws.plusDays(6).toString())
+                                timetableRepo.peekTimetable(context, ws.toString(), ws.plusDays(6).toString())
                             }.getOrNull()
                         if (peek != null) {
                             applyWeek(ws, peek.data)
@@ -215,7 +209,7 @@ class TimetableViewModel
                             if (!peek.isStale) return@launch
                         }
                     }
-                    loadWeek(ws, forceRefresh = forceRefresh || showedCache)
+                    loadWeek(ws, context, forceRefresh = forceRefresh || showedCache)
                 } catch (e: Exception) {
                     val offline = networkMonitor.isOnline.first().not()
                     _state.update {
@@ -234,32 +228,18 @@ class TimetableViewModel
 
         private suspend fun loadWeek(
             ws: LocalDate,
+            context: StudentRequestContext,
             forceRefresh: Boolean,
         ) {
-            val user = authRepository.getUserInfo() ?: error("Not logged in")
-            val selectedYearId = preferencesStore.getUserString(SELECTED_SEMESTER_YEAR_KEY).first()
-            val selectedClassId = preferencesStore.getUserString(SELECTED_SEMESTER_CLASS_KEY).first()
-            val semester =
-                attendanceRepo.getPreferredSemester(user.admno, user.brId, selectedYearId, selectedClassId, forceRefresh)
-            val guessedYear = semester.yearId.ifBlank { timetableUseCase.getAcadYear() }
-            val timetable = fetchTimetable(user, guessedYear, ws, ws.plusDays(6), forceRefresh)
+            val timetable =
+                timetableRepo.getTimetable(
+                    context,
+                    ws.toString(),
+                    ws.plusDays(6).toString(),
+                    forceRefresh,
+                )
             applyWeek(ws, timetable)
         }
-
-        private suspend fun fetchTimetable(
-            user: UserInfo,
-            guessedYear: String,
-            start: LocalDate,
-            end: LocalDate,
-            force: Boolean,
-        ): Map<String, List<TimetableSlot>> =
-            try {
-                timetableRepo.getTimetable(user.admno, user.brId, guessedYear, start.toString(), end.toString(), force)
-            } catch (firstError: Exception) {
-                val latestYear = attendanceRepo.getAcadYears(user.admno, user.brId, force).firstOrNull()?.id
-                if (latestYear.isNullOrBlank() || latestYear == guessedYear) throw firstError
-                timetableRepo.getTimetable(user.admno, user.brId, latestYear, start.toString(), end.toString(), force)
-            }
 
         private suspend fun applyWeek(
             ws: LocalDate,
@@ -333,28 +313,6 @@ class TimetableViewModel
             )
         }
 
-        private fun observeSemesterSelection() {
-            viewModelScope.launch {
-                combine(
-                    preferencesStore.getUserString(SELECTED_SEMESTER_YEAR_KEY),
-                    preferencesStore.getUserString(SELECTED_SEMESTER_CLASS_KEY),
-                ) { yearId, classId -> yearId to classId }
-                    .drop(1)
-                    .collect {
-                        rawByWeek.clear()
-                        _state.update {
-                            it.copy(
-                                dayCache = persistentMapOf(),
-                                loadedWeeks = persistentSetOf(),
-                                loadingWeeks = persistentSetOf(),
-                                failedWeeks = persistentSetOf(),
-                            )
-                        }
-                        ensureWeek(_state.value.currentDate)
-                    }
-            }
-        }
-
         @Suppress("MagicNumber")
         private fun startProgressTicker() {
             viewModelScope.launch {
@@ -374,9 +332,10 @@ class TimetableViewModel
 
         private fun loadHolidays() {
             viewModelScope.launch {
-                val user = authRepository.getUserInfo() ?: return@launch
-                val acadYear = timetableUseCase.getAcadYear()
-                val list = runCatching { calendarRepo.getHolidays(user.brId, acadYear) }.getOrDefault(emptyList())
+                val context = runCatching { authRepository.requireStudentRequestContext() }.getOrNull() ?: return@launch
+                val list =
+                    runCatching { calendarRepo.getHolidays(context.brId, context.academicYear) }
+                        .getOrDefault(emptyList())
                 holidays =
                     list.mapNotNull { h ->
                         runCatching { LocalDate.parse(h.date) to h.name }.getOrNull()

@@ -103,6 +103,27 @@ class TokenManager
 
         fun getDeviceId(): String? = prefs.getString(KEY_DEVICE_ID, null)
 
+        fun saveAcademicYear(
+            academicYear: String,
+            fetchedAt: Long,
+        ) {
+            val admno = getActiveAdmno() ?: return
+            prefs.edit()
+                .putString("${admno}_$KEY_ACADEMIC_YEAR", academicYear)
+                .putLong("${admno}_$KEY_ACADEMIC_YEAR_FETCHED_AT", fetchedAt)
+                .apply()
+        }
+
+        fun getAcademicYear(): String? {
+            val admno = getActiveAdmno() ?: return null
+            return prefs.getString("${admno}_$KEY_ACADEMIC_YEAR", null)
+        }
+
+        fun getAcademicYearFetchedAt(): Long {
+            val admno = getActiveAdmno() ?: return 0L
+            return prefs.getLong("${admno}_$KEY_ACADEMIC_YEAR_FETCHED_AT", 0L)
+        }
+
         fun saveUserMeta(
             email: String,
             phone: String,
@@ -143,6 +164,8 @@ class TokenManager
                 .remove("${admno}_$KEY_REFRESH")
                 .remove("${admno}_$KEY_EMAIL")
                 .remove("${admno}_$KEY_PHONE")
+                .remove("${admno}_$KEY_ACADEMIC_YEAR")
+                .remove("${admno}_$KEY_ACADEMIC_YEAR_FETCHED_AT")
                 .apply()
             if (getActiveAdmno() == admno) {
                 val next = accounts.firstOrNull()?.admno
@@ -209,6 +232,8 @@ class TokenManager
             private const val KEY_DEVICE_ID = "device_id"
             private const val KEY_EMAIL = "email"
             private const val KEY_PHONE = "phone"
+            private const val KEY_ACADEMIC_YEAR = "academic_year"
+            private const val KEY_ACADEMIC_YEAR_FETCHED_AT = "academic_year_fetched_at"
             private const val KEY_ACTIVE_ADMNO = "active_admno"
             private const val KEY_ACCOUNT_LIST = "account_list"
         }

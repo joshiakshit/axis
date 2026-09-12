@@ -2,11 +2,16 @@ package com.ash.axis.data.repository
 
 import com.ash.axis.data.api.ICloudEmsApi
 import com.ash.axis.data.db.CacheDao
+import com.ash.axis.domain.model.StudentRequestContext
 import com.ash.axis.domain.model.TimetableSlot
-import com.ash.axis.tenant.Tenants
 import com.ash.core.storage.CachePolicy
 import com.ash.core.storage.CachedResult
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -26,34 +31,41 @@ class TimetableRepository
         private val normalizer = TimetableNormalizer(json)
 
         private fun timetableKey(
-            admno: String,
+            context: StudentRequestContext,
+            route: TimetableRoute,
             startDate: String,
             endDate: String,
-        ) = "v2_timetable_${admno}_${startDate}_$endDate"
+            dated: Boolean = false,
+        ): String {
+            val kind = if (dated) "dated" else "weekly"
+            return "v3_timetable_${kind}_${context.admno}_${context.brId}_${context.clientId}_" +
+                "${context.academicYear}_${route.name.lowercase()}_${startDate}_$endDate"
+        }
 
         suspend fun peekTimetable(
-            admno: String,
+            context: StudentRequestContext,
             startDate: String,
             endDate: String,
         ): CachedResult<Map<String, List<TimetableSlot>>>? {
-            return cacheStore.peek(timetableKey(admno, startDate, endDate))
+            return TimetableRoute.entries
+                .mapNotNull { route -> cacheStore.peek(timetableKey(context, route, startDate, endDate)) }
+                .maxByOrNull { it.cachedAtMillis }
         }
 
         suspend fun getTimetable(
-            admno: String,
-            brId: Int,
-            acadYear: String,
+            context: StudentRequestContext,
             startDate: String,
             endDate: String,
             forceRefresh: Boolean = false,
         ): Map<String, List<TimetableSlot>> {
-            val cacheKey = timetableKey(admno, startDate, endDate)
+            val route = resolveRoute(context)
+            val cacheKey = timetableKey(context, route, startDate, endDate)
             if (!forceRefresh) {
                 cacheStore.cached(cacheKey, CachePolicy.TIMETABLE)?.let { return it }
             }
 
             return try {
-                val result = fetchTimetableResponse(admno, brId, acadYear, startDate, endDate)
+                val result = fetchTimetableResponse(context, route, startDate, endDate)
                 val timetable = normalizer.normalizeTimetable(result)
                 cacheStore.store(cacheKey, timetable)
                 timetable
@@ -63,20 +75,19 @@ class TimetableRepository
         }
 
         suspend fun getDateKeyedTimetable(
-            admno: String,
-            brId: Int,
-            acadYear: String,
+            context: StudentRequestContext,
             startDate: String,
             endDate: String,
             forceRefresh: Boolean = false,
         ): Map<LocalDate, List<TimetableSlot>> {
-            val cacheKey = "v2_timetable_dated_${admno}_${startDate}_$endDate"
+            val route = resolveRoute(context)
+            val cacheKey = timetableKey(context, route, startDate, endDate, dated = true)
             if (!forceRefresh) {
                 cacheStore.cachedDateKeyed(cacheKey, CachePolicy.TIMETABLE)?.let { return it }
             }
 
             return try {
-                val result = fetchTimetableResponse(admno, brId, acadYear, startDate, endDate)
+                val result = fetchTimetableResponse(context, route, startDate, endDate)
                 val timetable = normalizer.normalizeDateKeyed(result, LocalDate.parse(startDate), LocalDate.parse(endDate))
                 cacheStore.storeDateKeyed(cacheKey, timetable)
                 timetable
@@ -90,9 +101,7 @@ class TimetableRepository
         }
 
         private fun timetableBody(
-            admno: String,
-            brId: Int,
-            acadYear: String,
+            context: StudentRequestContext,
             startDate: String,
             endDate: String,
         ) = studentApi.jsonBody(
@@ -102,35 +111,74 @@ class TimetableRepository
             "method" to "getData",
             "startDate" to startDate,
             "endDate" to endDate,
-            "br_id" to brId,
-            "admno" to admno,
+            "br_id" to context.brId,
+            "admno" to context.admno,
             "room" to "",
-            "client" to Tenants.GU.clientCode,
-            "acadyr" to acadYear,
+            "client" to context.clientId,
+            "acadyr" to context.academicYear,
         )
 
+        private fun featureBody(context: StudentRequestContext) =
+            studentApi.jsonBody(
+                "from" to "app",
+                "empid" to "",
+                "method" to "getbatchwisebranchwiseflow",
+                "br_id" to context.brId,
+                "admno" to context.admno,
+                "client" to context.clientId,
+                "acadyr" to context.academicYear,
+            )
+
+        private suspend fun resolveRoute(context: StudentRequestContext): TimetableRoute =
+            runCatching {
+                authRepository.refreshTokenIfNeeded()
+                val result =
+                    studentApi.parseStudentResponse(
+                        studentApi.requireBody("getTimetableRoute", api.postTimetableV1(featureBody(context))),
+                    )
+                TimetableRouteSelector.select(result)
+            }.getOrDefault(TimetableRoute.LEGACY)
+
         private suspend fun fetchTimetableResponse(
-            admno: String,
-            brId: Int,
-            acadYear: String,
+            context: StudentRequestContext,
+            route: TimetableRoute,
             startDate: String,
             endDate: String,
-        ): kotlinx.serialization.json.JsonElement {
+        ): JsonElement {
             authRepository.refreshTokenIfNeeded()
-            return try {
-                studentApi.parseStudentResponse(
-                    studentApi.requireBody(
-                        "getTimetableV1",
-                        api.postTimetableV1(timetableBody(admno, brId, acadYear, startDate, endDate)),
-                    ),
-                )
-            } catch (_: Exception) {
-                studentApi.parseStudentResponse(
-                    studentApi.requireBody(
-                        "getTimetable",
-                        api.postTimetable(timetableBody(admno, brId, acadYear, startDate, endDate)),
-                    ),
-                )
-            }
+            val body = timetableBody(context, startDate, endDate)
+            val response =
+                when (route) {
+                    TimetableRoute.V1 -> studentApi.requireBody("getTimetableV1", api.postTimetableV1(body))
+                    TimetableRoute.LEGACY -> studentApi.requireBody("getTimetable", api.postTimetable(body))
+                }
+            return TimetableResponseValidator.requireSchedule(studentApi.parseStudentResponse(response))
         }
     }
+
+internal enum class TimetableRoute { LEGACY, V1 }
+
+internal object TimetableRouteSelector {
+    fun select(response: JsonElement): TimetableRoute {
+        val body = response as? JsonObject ?: return TimetableRoute.LEGACY
+        val status = body["status"] as? JsonPrimitive ?: return TimetableRoute.LEGACY
+        val enabled = body["enble_batch_wise_course_flow"] as? JsonPrimitive
+        return if (!status.isString && status.booleanOrNull == true && enabled?.contentOrNull == "1") {
+            TimetableRoute.V1
+        } else {
+            TimetableRoute.LEGACY
+        }
+    }
+}
+
+internal object TimetableResponseValidator {
+    private val scheduleKeys = setOf("emp_timetable", "timetable", "data", "result")
+
+    fun requireSchedule(response: JsonElement): JsonElement {
+        val body = response as? JsonObject
+        if (body == null || scheduleKeys.none(body::containsKey)) {
+            throw IcloudServerException(message = "Timetable response did not include schedule data")
+        }
+        return response
+    }
+}

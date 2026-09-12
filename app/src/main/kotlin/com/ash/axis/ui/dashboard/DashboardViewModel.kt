@@ -150,6 +150,8 @@ class DashboardViewModel
                     try {
                         val threshold = preferencesStore.getUserInt("attendance_threshold", 75).first()
                         val user = authRepository.getUserInfo() ?: error("Not logged in")
+                        val timetableContext =
+                            authRepository.requireStudentRequestContext(forceProfileRefresh = forceRefresh)
                         val firstName = user.name.split(" ").firstOrNull() ?: "there"
                         val semester = selectedSemester(user, forceRefresh)
                         val (weekStart, weekEnd) = timetableUseCase.getCurrentWeekRange()
@@ -170,9 +172,7 @@ class DashboardViewModel
                                     async {
                                         runCatching {
                                             timetableRepo.getTimetable(
-                                                user.admno,
-                                                user.brId,
-                                                semester.yearId,
+                                                timetableContext,
                                                 weekStart.toString(),
                                                 weekEnd.toString(),
                                                 forceRefresh,

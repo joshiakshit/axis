@@ -35,6 +35,21 @@ data class JwtPayload(
     @SerialName("client_id") val clientId: String = "",
 )
 
+@Serializable
+data class PersonalDetailsResponse(
+    val data: PersonalDetailsData? = null,
+)
+
+@Serializable
+data class PersonalDetailsData(
+    val result: StudentPersonalDetails? = null,
+)
+
+@Serializable
+data class StudentPersonalDetails(
+    @SerialName("academic_year") val academicYear: String = "",
+)
+
 data class UserInfo(
     val admno: String,
     val brId: Int,
@@ -43,4 +58,13 @@ data class UserInfo(
     val phoneNumber: String,
     val clientId: String = "",
     val preferredUsername: String = "",
+    val userType: String = "",
+    val academicYear: String = "",
+)
+
+data class StudentRequestContext(
+    val admno: String,
+    val brId: Int,
+    val clientId: String,
+    val academicYear: String,
 )
