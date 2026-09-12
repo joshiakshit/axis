@@ -17,6 +17,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+GRADLE="./gradlew"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) GRADLE="./gradlew.bat" ;;
+esac
+
 prop() { grep -E "^$1=" local.properties 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r'; }
 
 BASE="$(prop REMOTE_CONFIG_URL)"; BASE="${BASE%/}"
@@ -49,10 +54,10 @@ echo "▸ version  $OLD_NAME ($OLD_CODE) → $NEW_NAME ($NEW_CODE)"
 # --- build ---------------------------------------------------------------------------------------------
 if [ "$CHECK" = 1 ]; then
   echo "▸ running test + lint gate…"
-  ./gradlew :app:testDebugUnitTest ktlintCheck detekt -q
+  "$GRADLE" :app:testDebugUnitTest ktlintCheck detekt -q
 fi
 echo "▸ building signed release APK…"
-./gradlew :app:assembleRelease -q
+"$GRADLE" :app:assembleRelease -q
 APK="app/build/outputs/apk/release/app-release.apk"
 [ -f "$APK" ] || { echo "✗ APK not found at $APK"; exit 1; }
 echo "  $(du -h "$APK" | cut -f1)  $APK"
