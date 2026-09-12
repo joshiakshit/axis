@@ -1,8 +1,10 @@
-# Axis 3.0.9 session handoff
+# Axis 1.1.1 release handoff
 
 ## Current task
 
 Repair Axis authentication metadata and student timetable routing for iCloudEMS 3.0.9.
+
+The repair is complete and released as Axis 1.1.1, version code 9.
 
 The work is limited to these items:
 
@@ -48,7 +50,7 @@ The schedule request uses the existing `getData` payload. It must use the exact 
 
 ## Completed implementation
 
-The repair is committed in `efa74c3` and `440b10b`.
+The repair is committed in `efa74c3` and `440b10b`. The verification record is in `1599f5f`. Windows and explicit-code release support are in `43f8644` and `529261b`.
 
 | Area | Files | State |
 | --- | --- | --- |
@@ -85,6 +87,12 @@ Local validation passed on 2026-09-11 with JDK 17 and Android SDK 35:
 - The standard generated `app-debug.apk` had been overwritten by the forced-route build. It and its generated metadata were removed. Rebuild the normal debug APK before a future install.
 - The temporary debug certificate override was removed after traffic validation. Release certificate pinning is unchanged.
 - Codex's normal MCP launcher was blocked from the HTTP Toolkit control pipe with `EPERM`. Running the bundled MCP server outside the sandbox exposed the read-only traffic tools without restarting or clearing the capture.
+- The signed Axis 1.1.1 release APK was built with version code 9 and uploaded through the project release workflow.
+- Android tests, ktlint, Detekt, backend Vitest, and backend TypeScript type-check passed before release.
+- APK signature verification passed. The APK certificate matches `axis-release.jks`.
+- The deployed configuration reports latest version 1.1.1, code 9, with the existing minimum supported code 8.
+- The release APK SHA-256 is `f7952178d528595ffabef0cbe17a5659a0e052aa9f36ad3e771bf43b767ab0d2`.
+- The local release artifact is `app/build/outputs/apk/release/app-release.apk`.
 
 The installed tool state is:
 
@@ -104,12 +112,12 @@ The research root now contains only `v3.0.8/` and `v3.0.9/`. Historical inputs a
 
 ## Known open items
 
-1. Build and publish the signed 1.1.1 release.
+None for the authentication and timetable repair or the 1.1.1 release.
 
 Preserve the user's untracked `AGENTS.md`. Do not overwrite unrelated working-tree changes.
 
 ## Next concrete step
 
-Run the release validation gate with a fresh Gradle daemon. Then publish the signed 1.1.1 build without raising the forced-update floor.
+Choose the next work direction. QR work remains deferred until it is started as a separate task.
 
 Do not save credentials, OTPs, tokens, or student data in the evidence.

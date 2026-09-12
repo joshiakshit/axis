@@ -8,7 +8,7 @@ Axis is an easier interface for student data. It is not an exact copy of iCloudE
 
 ## Current priority
 
-Repair authentication metadata and timetable correctness for iCloudEMS 3.0.9. QR and broad freshness work are deferred.
+The authentication and timetable repair for iCloudEMS 3.0.9 shipped in Axis 1.1.1, version code 9. QR and broad freshness work are deferred.
 
 ## Stable research findings
 
@@ -54,6 +54,8 @@ Repair authentication metadata and timetable correctness for iCloudEMS 3.0.9. QR
 ## Work state
 
 The source implementation and unit tests pass local Android and backend validation. The repair is committed in `efa74c3` and `440b10b`.
+
+Axis 1.1.1, version code 9, was signed with the configured release keystore and published on 2026-09-12. The deployed latest version is code 9. The existing minimum supported version remains code 8. The verified APK SHA-256 is `f7952178d528595ffabef0cbe17a5659a0e052aa9f36ad3e771bf43b767ab0d2`.
 
 Installed and verified tools:
 
