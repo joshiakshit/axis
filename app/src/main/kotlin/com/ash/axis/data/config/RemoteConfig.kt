@@ -25,6 +25,6 @@ data class RemoteConfig(
     val updatedAt: String = "",
 ) {
     companion object {
-        const val DEFAULT_APP_VERSION = "3.0.8"
+        const val DEFAULT_APP_VERSION = "3.0.9"
     }
 }

@@ -9,7 +9,7 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
     CONFIG: new FakeKV(),
     DB: new FakeD1(),
-    DEFAULT_APP_VERSION: "3.0.3",
+    DEFAULT_APP_VERSION: "3.0.9",
     DEFAULT_TENANT: "gu",
     SESSION_SECRET: SECRET,
     ADMIN_ADMNOS: "21000",

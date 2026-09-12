@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import { Env, applyPatch, defaultConfig, parseStored, weakEtag } from "../src/config";
 
 // A minimal Env; the KV binding is unused by the pure helpers under test.
-const env = { DEFAULT_APP_VERSION: "3.0.3", DEFAULT_TENANT: "gu" } as unknown as Env;
+const env = { DEFAULT_APP_VERSION: "3.0.9", DEFAULT_TENANT: "gu" } as unknown as Env;
 
 describe("defaultConfig", () => {
   it("uses the env appVersion and omits authToken when unseeded", () => {
     const c = defaultConfig(env);
-    expect(c.appVersion).toBe("3.0.3");
+    expect(c.appVersion).toBe("3.0.9");
     expect(c.killSwitch).toBe(false);
     expect("authToken" in c).toBe(false);
   });
@@ -20,9 +20,9 @@ describe("defaultConfig", () => {
 
 describe("parseStored", () => {
   it("returns defaults for null or corrupt input", () => {
-    expect(parseStored(null, env).appVersion).toBe("3.0.3");
-    expect(parseStored("{not json", env).appVersion).toBe("3.0.3");
-    expect(parseStored("42", env).appVersion).toBe("3.0.3");
+    expect(parseStored(null, env).appVersion).toBe("3.0.9");
+    expect(parseStored("{not json", env).appVersion).toBe("3.0.9");
+    expect(parseStored("42", env).appVersion).toBe("3.0.9");
   });
 
   it("fills missing keys from defaults (schema growth is safe)", () => {

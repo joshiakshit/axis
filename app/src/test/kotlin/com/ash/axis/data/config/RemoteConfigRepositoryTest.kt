@@ -31,6 +31,7 @@ class RemoteConfigRepositoryTest {
         val r = repo(mockk())
         assertEquals(BAKED, r.effectiveAuthToken(BAKED))
         assertEquals(RemoteConfig.DEFAULT_APP_VERSION, r.appVersion())
+        assertEquals("3.0.9", r.appVersion())
     }
 
     @Test

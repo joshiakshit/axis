@@ -19,7 +19,7 @@ It can also **kill-switch** the app or enforce a **minimum version** in an emerg
 ```jsonc
 {
   "authToken": "…",              // optional; omitted → app uses its baked-in token
-  "appVersion": "3.0.3",
+  "appVersion": "3.0.9",
   "minSupportedVersionCode": 1,  // app blocks if BuildConfig.VERSION_CODE < this
   "latestVersionCode": 1,        // for a soft "update available" nudge
   "latestVersionName": "1.0.0",

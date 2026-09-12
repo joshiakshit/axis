@@ -62,7 +62,7 @@ const EPOCH = new Date(0).toISOString();
 /** Baseline config used when KV holds nothing yet. */
 export function defaultConfig(env: Env): RemoteConfig {
   const base: RemoteConfig = {
-    appVersion: env.DEFAULT_APP_VERSION?.trim() || "3.0.3",
+    appVersion: env.DEFAULT_APP_VERSION?.trim() || "3.0.9",
     minSupportedVersionCode: 1,
     latestVersionCode: 1,
     latestVersionName: "1.0.0",

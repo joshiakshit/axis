@@ -23,7 +23,7 @@ binding = "APK"
 bucket_name = "axis-apk"
 
 [vars]
-DEFAULT_APP_VERSION = "3.0.3"
+DEFAULT_APP_VERSION = "3.0.9"
 DEFAULT_TENANT = "gu"
 # When "true", new users are auto-approved (use during rollout, then set back to "false").
 OPEN_ENROLLMENT = "false"
