@@ -7,6 +7,7 @@
 #
 #   scripts/release.sh                 # auto-bump patch (1.1.0 -> 1.1.1), advertise as the latest build
 #   scripts/release.sh 1.2.0           # set an explicit versionName, e.g. a feature release
+#   scripts/release.sh 1.2.0 --code=9  # set an explicit versionName and versionCode
 #   scripts/release.sh --force         # ALSO raise the force-update floor (blocks old builds until updated)
 #   scripts/release.sh 1.2.0 --force   # both
 #   scripts/release.sh --check         # run the full test/lint gate before building
@@ -30,11 +31,12 @@ ADMIN_TOKEN="$(prop ADMIN_TOKEN)"
 [ -n "$ADMIN_TOKEN" ] || { echo "✗ ADMIN_TOKEN missing from local.properties (wrangler secret value)"; exit 1; }
 
 # --- args ---------------------------------------------------------------------------------------------
-FORCE=0; CHECK=0; NEW_NAME=""
+FORCE=0; CHECK=0; NEW_NAME=""; NEW_CODE=""
 for a in "$@"; do
   case "$a" in
     --force) FORCE=1 ;;
     --check) CHECK=1 ;;
+    --code=*) NEW_CODE="${a#*=}" ;;
     -*)      echo "unknown flag: $a"; exit 1 ;;
     *)       NEW_NAME="$a" ;;
   esac
@@ -43,7 +45,11 @@ done
 # --- bump version.properties --------------------------------------------------------------------------
 OLD_CODE="$(grep -E '^VERSION_CODE=' version.properties | cut -d= -f2- | tr -d '\r')"
 OLD_NAME="$(grep -E '^VERSION_NAME=' version.properties | cut -d= -f2- | tr -d '\r')"
-NEW_CODE=$(( OLD_CODE + 1 ))
+[ -n "$NEW_CODE" ] || NEW_CODE=$(( OLD_CODE + 1 ))
+case "$NEW_CODE" in
+  *[!0-9]*|'') echo "version code must be a positive integer"; exit 1 ;;
+esac
+[ "$NEW_CODE" -gt "$OLD_CODE" ] || { echo "version code must be greater than $OLD_CODE"; exit 1; }
 if [ -z "$NEW_NAME" ]; then
   IFS=. read -r MA MI PA <<<"$OLD_NAME"
   NEW_NAME="${MA:-1}.${MI:-0}.$(( ${PA:-0} + 1 ))"   # auto patch-bump
