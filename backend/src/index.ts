@@ -145,6 +145,7 @@ function parseMeta(body: unknown): SessionMeta {
     appVersionCode: num(b.appVersionCode),
     deviceModel: str(b.deviceModel),
     androidSdk: num(b.androidSdk),
+    deviceId: str(b.deviceId),
   };
 }
 

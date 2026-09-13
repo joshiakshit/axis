@@ -13,9 +13,16 @@ export interface SessionMeta {
   appVersionCode: number;
   deviceModel: string;
   androidSdk: number;
+  deviceId: string;
 }
 
-export const EMPTY_META: SessionMeta = { appVersionName: "", appVersionCode: 0, deviceModel: "", androidSdk: 0 };
+export const EMPTY_META: SessionMeta = {
+  appVersionName: "",
+  appVersionCode: 0,
+  deviceModel: "",
+  androidSdk: 0,
+  deviceId: "",
+};
 
 export interface UserRow {
   admno: string;
@@ -31,12 +38,13 @@ export interface UserRow {
   app_version_code: number;
   device_model: string;
   android_sdk: number;
+  device_id: string;
   session_count: number;
 }
 
 const SELECT =
   "SELECT admno, name, email, status, role, created_at, last_seen_at, first_seen_at, approved_at, " +
-  "app_version_name, app_version_code, device_model, android_sdk, session_count FROM users";
+  "app_version_name, app_version_code, device_model, android_sdk, device_id, session_count FROM users";
 
 export async function getUser(env: Env, admno: string): Promise<UserRow | null> {
   return env.DB.prepare(`${SELECT} WHERE admno = ?`).bind(admno).first<UserRow>();
@@ -69,8 +77,8 @@ export async function upsertOnSession(
     const approvedAt = status === "approved" ? now : "";
     await env.DB.prepare(
       "INSERT INTO users (admno, name, email, status, role, created_at, last_seen_at, first_seen_at, approved_at, " +
-        "app_version_name, app_version_code, device_model, android_sdk, session_count) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+        "app_version_name, app_version_code, device_model, android_sdk, device_id, session_count) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
     )
       .bind(
         claims.admno,
@@ -86,6 +94,7 @@ export async function upsertOnSession(
         meta.appVersionCode,
         meta.deviceModel,
         meta.androidSdk,
+        meta.deviceId,
       )
       .run();
     return {
@@ -102,6 +111,7 @@ export async function upsertOnSession(
       app_version_code: meta.appVersionCode,
       device_model: meta.deviceModel,
       android_sdk: meta.androidSdk,
+      device_id: meta.deviceId,
       session_count: 1,
     };
   }
@@ -118,10 +128,12 @@ export async function upsertOnSession(
   const appVersionCode = meta.appVersionCode || existing.app_version_code;
   const deviceModel = meta.deviceModel || existing.device_model;
   const androidSdk = meta.androidSdk || existing.android_sdk;
+  const deviceId = meta.deviceId || existing.device_id;
   const sessionCount = existing.session_count + 1;
   await env.DB.prepare(
     "UPDATE users SET name = ?, email = ?, role = ?, status = ?, last_seen_at = ?, first_seen_at = ?, approved_at = ?, " +
-      "app_version_name = ?, app_version_code = ?, device_model = ?, android_sdk = ?, session_count = ? WHERE admno = ?",
+      "app_version_name = ?, app_version_code = ?, device_model = ?, android_sdk = ?, device_id = ?, " +
+      "session_count = ? WHERE admno = ?",
   )
     .bind(
       name,
@@ -135,6 +147,7 @@ export async function upsertOnSession(
       appVersionCode,
       deviceModel,
       androidSdk,
+      deviceId,
       sessionCount,
       claims.admno,
     )
@@ -152,6 +165,7 @@ export async function upsertOnSession(
     app_version_code: appVersionCode,
     device_model: deviceModel,
     android_sdk: androidSdk,
+    device_id: deviceId,
     session_count: sessionCount,
   };
 }

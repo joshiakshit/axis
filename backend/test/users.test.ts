@@ -46,12 +46,23 @@ describe("upsertOnSession", () => {
 
   it("counts launches and records the latest telemetry", async () => {
     const e = env();
-    const meta = { appVersionName: "1.2.0", appVersionCode: 5, deviceModel: "SM-A156E", androidSdk: 34 };
+    const meta = {
+      appVersionName: "1.2.0",
+      appVersionCode: 5,
+      deviceModel: "SM-A156E",
+      androidSdk: 34,
+      deviceId: "first-device-id",
+    };
     const first = await upsertOnSession(e, claims("21008"), false, false, meta);
-    expect(first).toMatchObject({ session_count: 1, app_version_code: 5, device_model: "SM-A156E" });
-    const second = await upsertOnSession(e, claims("21008"), false, false, { ...meta, appVersionCode: 6 });
+    expect(first).toMatchObject({ session_count: 1, app_version_code: 5, device_id: "first-device-id" });
+    const second = await upsertOnSession(e, claims("21008"), false, false, {
+      ...meta,
+      appVersionCode: 6,
+      deviceId: "second-device-id",
+    });
     expect(second.session_count).toBe(2);
     expect(second.app_version_code).toBe(6);
+    expect(second.device_id).toBe("second-device-id");
   });
 });
 

@@ -12,6 +12,7 @@ data class SessionRequest(
     val appVersionCode: Int = 0,
     val deviceModel: String = "",
     val androidSdk: Int = 0,
+    val deviceId: String = "",
 )
 
 // Partial patch for PUT /v1/admin/config. Only non-null fields are serialized (Json encodeDefaults = false),

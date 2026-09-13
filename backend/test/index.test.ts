@@ -44,6 +44,7 @@ describe("POST /v1/session", () => {
           appVersionCode: 7,
           deviceModel: "Pixel 8",
           androidSdk: 34,
+          deviceId: "compatible-device-id",
         }),
       }),
       env,
@@ -58,8 +59,10 @@ describe("POST /v1/session", () => {
       req("/v1/admin/users", { headers: { authorization: `Bearer ${body.sessionToken}` } }),
       env,
     );
-    const users = ((await list.json()) as { users: Array<{ app_version_code: number; device_model: string }> }).users;
-    expect(users[0]).toMatchObject({ app_version_code: 7, device_model: "Pixel 8" });
+    const users = ((await list.json()) as {
+      users: Array<{ app_version_code: number; device_model: string; device_id: string }>;
+    }).users;
+    expect(users[0]).toMatchObject({ app_version_code: 7, device_model: "Pixel 8", device_id: "compatible-device-id" });
   });
 
   it("holds a brand-new user as pending with no token", async () => {
