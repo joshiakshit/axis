@@ -8,6 +8,7 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
@@ -16,11 +17,34 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 
 private const val KEY = "remote_config"
 private const val BAKED = "baked-in-token"
 
 class RemoteConfigRepositoryTest {
+    @Test
+    fun `cancelled resume refresh does not publish data`() =
+        runTest {
+            val api = mockk<RemoteConfigApi>()
+            coEvery { api.getConfig() } throws CancellationException()
+            val repository = repo(api)
+            assertThrows<CancellationException> { repository.refresh() }
+            coVerify(exactly = 0) { prefs.putString(any(), any()) }
+        }
+
+    @Test
+    fun `later resume refresh replaces previous config`() =
+        runTest {
+            val api = mockk<RemoteConfigApi>()
+            coEvery { api.getConfig() } returnsMany listOf(RemoteConfig(message = "First"), RemoteConfig(message = "Second"))
+            coEvery { prefs.putString(KEY, any()) } just Runs
+            val repository = repo(api)
+            repository.refresh()
+            repository.refresh()
+            assertEquals("Second", repository.state.value.message)
+        }
+
     private val json = Json { ignoreUnknownKeys = true }
     private val prefs = mockk<PreferencesStore>(relaxed = false)
 

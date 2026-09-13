@@ -2,6 +2,7 @@ package com.ash.axis.data.config
 
 import com.ash.axis.data.api.RemoteConfigApi
 import com.ash.core.storage.PreferencesStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -52,6 +53,8 @@ class RemoteConfigRepository
             val fetched =
                 try {
                     client.getConfig()
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (_: Exception) {
                     return
                 }

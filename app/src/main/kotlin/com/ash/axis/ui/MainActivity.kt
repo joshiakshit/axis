@@ -14,8 +14,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.ash.axis.data.config.RemoteConfigRepository
 import com.ash.axis.data.session.AxisSessionRepository
 import com.ash.core.storage.PreferencesStore
@@ -59,32 +61,37 @@ class MainActivity : FragmentActivity() {
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        requestHighRefreshRate()
         if (intent?.action == ACTION_SCAN_QR) qrScanRequests.value += 1
 
         var startup by mutableStateOf<StartupData?>(null)
         splashScreen.setKeepOnScreenCondition { startup == null }
-        lifecycleScope.launch {
-            // Load the last-known remote config from disk before first use so a rotated token/appversion is
-            // already in effect, then refresh from the backend in the background (no-op when disabled).
-            withContext(Dispatchers.IO) {
-                remoteConfig.hydrate()
-                axisSession.hydrate()
-            }
-            startup =
+        val startupJob =
+            lifecycleScope.launch {
+                // Load the last-known remote config from disk before first use so a rotated token/appversion is
+                // already in effect, then refresh from the backend in the background (no-op when disabled).
                 withContext(Dispatchers.IO) {
-                    StartupData(
-                        themeMode = preferencesStore.getString("theme_mode", ThemeMode.DARK.name).first(),
-                        colorProfile =
-                            preferencesStore
-                                .getString("color_profile", ColorProfiles.Default.name)
-                                .first(),
-                        accentColor = preferencesStore.getString("accent_color", "").first(),
-                        startRoute = preferencesStore.getString("last_route", "dashboard").first(),
-                    )
+                    remoteConfig.hydrate()
+                    axisSession.hydrate()
                 }
+                startup =
+                    withContext(Dispatchers.IO) {
+                        StartupData(
+                            themeMode = preferencesStore.getString("theme_mode", ThemeMode.DARK.name).first(),
+                            colorProfile =
+                                preferencesStore
+                                    .getString("color_profile", ColorProfiles.Default.name)
+                                    .first(),
+                            accentColor = preferencesStore.getString("accent_color", "").first(),
+                            startRoute = preferencesStore.getString("last_route", "dashboard").first(),
+                        )
+                    }
+            }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                startupJob.join()
+                remoteConfig.refresh()
+            }
         }
-        lifecycleScope.launch { remoteConfig.refresh() }
 
         val launchedForScan = intent?.action == ACTION_SCAN_QR
 
@@ -139,15 +146,6 @@ class MainActivity : FragmentActivity() {
                 }
             }
         }
-    }
-
-    @Suppress("DEPRECATION")
-    private fun requestHighRefreshRate() {
-        val display = display ?: window.windowManager.defaultDisplay ?: return
-        val bestMode =
-            display.supportedModes.maxByOrNull { it.refreshRate } ?: return
-        window.attributes =
-            window.attributes.apply { preferredDisplayModeId = bestMode.modeId }
     }
 
     companion object {
