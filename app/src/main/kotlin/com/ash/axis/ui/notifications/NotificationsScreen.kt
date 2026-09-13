@@ -19,8 +19,12 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -39,6 +43,7 @@ import com.ash.core.ui.theme.AppShapes
 import com.ash.core.ui.theme.cardColor
 import com.ash.core.util.Result
 
+@Suppress("LongMethod")
 @Composable
 fun NotificationsScreen(
     modifier: Modifier = Modifier,
@@ -46,11 +51,20 @@ fun NotificationsScreen(
     viewModel: NotificationsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    var selected by remember { mutableStateOf<AppNotification?>(null) }
+    selected?.let { notification ->
+        NotificationDetails(
+            notification = notification,
+            readError = state.readError,
+            onMarkAsRead = { viewModel.markAsRead(notification) },
+            onDismiss = { selected = null },
+        )
+    }
 
     val result: Result<NotificationsUiState> =
         when {
             state.isLoading -> Result.Loading
-            state.error != null && state.notifications.isEmpty() -> Result.Error(Exception(state.error), state.error)
+            state.error != null && state.updatedAt == null -> Result.Error(Exception(state.error), state.error)
             else -> Result.Success(state)
         }
 
@@ -77,23 +91,35 @@ fun NotificationsScreen(
         }
         LoadingStateContainer(result = result, onRetry = viewModel::refresh) { data ->
             PullToRefreshContainer(isRefreshing = data.isRefreshing, onRefresh = viewModel::refresh) {
-                if (data.notifications.isEmpty()) {
-                    EmptyState(title = "No notifications", subtitle = "You're all caught up")
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = AppDimens.screenPadding),
-                        verticalArrangement = Arrangement.spacedBy(AppDimens.listItemSpacing),
-                    ) {
-                        item { Spacer(Modifier.height(4.dp)) }
-                        itemsIndexed(
-                            data.notifications,
-                            key = { index, n -> "${index}_${n.id}" },
-                        ) { _, notification ->
-                            NotificationCard(notification)
-                        }
-                        item { BottomSpacer() }
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = AppDimens.screenPadding),
+                    verticalArrangement = Arrangement.spacedBy(AppDimens.listItemSpacing),
+                ) {
+                    item { Spacer(Modifier.height(4.dp)) }
+                    item {
+                        FeedStatus(data.updatedAt, data.fromCache, data.error)
+                        Text("Read status is saved in Axis on this device.", style = MaterialTheme.typography.bodySmall)
+                        if (data.error != null) TextButton(onClick = viewModel::refresh) { Text("Retry") }
                     }
+                    if (data.notifications.isEmpty()) {
+                        item {
+                            EmptyState(
+                                title = if (data.fromCache) "No saved notifications" else "No notifications",
+                                subtitle = if (data.error != null) "Refresh to check for new notices" else "You're all caught up",
+                            )
+                        }
+                    }
+                    itemsIndexed(
+                        data.notifications,
+                        key = { index, n -> "${index}_${n.id}" },
+                    ) { _, notification ->
+                        NotificationCard(notification) {
+                            selected = notification
+                            viewModel.markAsRead(notification)
+                        }
+                    }
+                    item { BottomSpacer() }
                 }
             }
         }
@@ -101,13 +127,20 @@ fun NotificationsScreen(
 }
 
 @Composable
-private fun NotificationCard(notification: AppNotification) {
+private fun NotificationCard(
+    notification: AppNotification,
+    onClick: () -> Unit,
+) {
     Surface(
+        onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         shape = AppShapes.medium,
         color = cardColor(),
     ) {
         Column(modifier = Modifier.padding(AppDimens.cardPadding)) {
+            if (!notification.read) {
+                Text("Unread", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            }
             if (notification.type.isNotBlank()) {
                 Text(
                     notification.type.uppercase(),

@@ -19,4 +19,8 @@ data class AppNotification(
     val type: String = "",
     @JsonNames("is_read", "isRead", "read")
     val read: Boolean = false,
-)
+    @JsonNames("url", "link", "documentUrl")
+    val url: String = "",
+) {
+    val readKey: String get() = id.ifBlank { listOf(title, message, date, url).joinToString("|") { "${it.length}:$it" } }
+}

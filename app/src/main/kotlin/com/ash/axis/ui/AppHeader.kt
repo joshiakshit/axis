@@ -15,6 +15,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -34,6 +36,7 @@ import com.ash.axis.R
 internal fun AppHeader(
     onSettingsClick: () -> Unit,
     onNotificationsClick: () -> Unit = {},
+    unreadCount: Int = 0,
     accountName: String = "",
     hasMultipleAccounts: Boolean = false,
     onAccountClick: () -> Unit = {},
@@ -60,12 +63,16 @@ internal fun AppHeader(
         )
         Spacer(Modifier.width(2.dp))
         IconButton(onClick = onNotificationsClick) {
-            Icon(
-                Icons.Default.Notifications,
-                contentDescription = "Notifications",
-                modifier = Modifier.size(22.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            BadgedBox(badge = {
+                if (unreadCount > 0) Badge { Text(if (unreadCount > 99) "99+" else unreadCount.toString()) }
+            }) {
+                Icon(
+                    Icons.Default.Notifications,
+                    contentDescription = if (unreadCount > 0) "Notifications, $unreadCount unread" else "Notifications",
+                    modifier = Modifier.size(22.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         IconButton(onClick = onSettingsClick) {
             Icon(

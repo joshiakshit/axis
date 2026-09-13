@@ -31,9 +31,4 @@ interface AuthApi {
     suspend fun getEvents(
         @Body body: Map<String, String>,
     ): Response<ResponseBody>
-
-    @POST("notifications/user/get")
-    suspend fun getNotifications(
-        @Body body: Map<String, String>,
-    ): Response<ResponseBody>
 }

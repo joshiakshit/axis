@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
@@ -31,6 +32,7 @@ import com.ash.axis.ui.account.AccountSwitcherSheet
 import com.ash.axis.ui.dashboard.DashboardScreen
 import com.ash.axis.ui.grades.GradesScreen
 import com.ash.axis.ui.notifications.NotificationsScreen
+import com.ash.axis.ui.notifications.NotificationsViewModel
 import com.ash.axis.ui.qr.QrScanFlow
 import com.ash.axis.ui.qr.QrScanViewModel
 import com.ash.axis.ui.settings.AdminScreen
@@ -64,6 +66,12 @@ internal fun MainApp(
     var showQrFlow by remember { mutableStateOf(false) }
     var showAccountSwitcher by remember { mutableStateOf(false) }
     val account = accounts.account
+    val notificationsViewModel: NotificationsViewModel = hiltViewModel(key = "notifications_${account.activeAdmno}")
+    val notifications by notificationsViewModel.state.collectAsStateWithLifecycle()
+    LifecycleResumeEffect(notificationsViewModel) {
+        notificationsViewModel.sync()
+        onPauseOrDispose { }
+    }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
 
@@ -126,6 +134,7 @@ internal fun MainApp(
             },
             topBar = {
                 AppHeader(
+                    unreadCount = notifications.unreadCount,
                     onSettingsClick = navigateToSettings,
                     onNotificationsClick = {
                         navController.navigate("notifications") { launchSingleTop = true }
@@ -170,6 +179,7 @@ internal fun MainApp(
                             },
                             "notifications" to {
                                 NotificationsScreen(
+                                    viewModel = notificationsViewModel,
                                     modifier = Modifier.padding(innerPadding),
                                     onBack = { navController.popBackStack() },
                                 )
