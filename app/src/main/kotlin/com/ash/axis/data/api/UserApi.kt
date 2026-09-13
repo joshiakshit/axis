@@ -12,6 +12,16 @@ interface UserApi {
         @Body body: Map<String, String>,
     ): PersonalDetailsResponse
 
+    @POST("calendar/getholiday")
+    suspend fun getHolidays(
+        @Body body: Map<String, String>,
+    ): Response<ResponseBody>
+
+    @POST("calendar/getevent")
+    suspend fun getEvents(
+        @Body body: Map<String, String>,
+    ): Response<ResponseBody>
+
     @POST("notifications/user/get")
     suspend fun getNotifications(
         @Body body: Map<String, String>,

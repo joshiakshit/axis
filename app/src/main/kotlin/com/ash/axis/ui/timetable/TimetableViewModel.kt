@@ -11,7 +11,9 @@ import com.ash.axis.data.repository.TimetableRepository
 import com.ash.axis.domain.model.StudentRequestContext
 import com.ash.axis.domain.model.TimetableSlot
 import com.ash.axis.domain.usecase.TimetableUseCase
+import com.ash.axis.ui.CalendarUiState
 import com.ash.axis.ui.ErrorText
+import com.ash.axis.ui.loadState
 import com.ash.core.network.NetworkMonitor
 import com.ash.core.storage.PreferencesStore
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -24,6 +26,7 @@ import kotlinx.collections.immutable.persistentSetOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.collections.immutable.toImmutableMap
 import kotlinx.collections.immutable.toImmutableSet
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -74,6 +77,7 @@ data class TimetableUiState(
     val jumpTarget: LocalDate? = null,
     val isRefreshing: Boolean = false,
     val isOffline: Boolean = false,
+    val calendar: CalendarUiState = CalendarUiState(),
 )
 
 @HiltViewModel
@@ -98,14 +102,15 @@ class TimetableViewModel
 
         // Raw (unprocessed) slots per week, kept so the progress ticker can rebuild today's "LIVE" bars.
         private val rawByWeek = mutableMapOf<LocalDate, Map<String, List<TimetableSlot>>>()
-        private var holidays = mapOf<LocalDate, String>()
+        private var calendarJob: Job? = null
+        private var calendarMonth: LocalDate? = null
 
         init {
             val today = LocalDate.now()
             _state.update { it.copy(anchorDate = today, currentDate = today) }
             ensureWeekInternal(today, forceRefresh = false, isInitial = true)
             startProgressTicker()
-            loadHolidays()
+            loadCalendar()
             viewModelScope.launch {
                 refreshSignal.signal.collect { event ->
                     if (event.sourceId != refreshSourceId &&
@@ -124,6 +129,7 @@ class TimetableViewModel
         // neighbours, so crossing a week boundary is instant) is loaded.
         fun onDateShown(date: LocalDate) {
             if (_state.value.currentDate != date) _state.update { it.copy(currentDate = date) }
+            loadCalendar()
             persistViewDate(date)
             ensureWeek(date)
             ensureWeek(date.plusDays(1))
@@ -133,6 +139,7 @@ class TimetableViewModel
         // Teleport to any date (date picker / Today button / day-strip tap).
         fun jumpTo(date: LocalDate) {
             _state.update { it.copy(currentDate = date, jumpTarget = date) }
+            loadCalendar()
             persistViewDate(date)
             ensureWeek(date)
         }
@@ -151,6 +158,7 @@ class TimetableViewModel
         fun retryWeek(date: LocalDate) = ensureWeekInternal(date, forceRefresh = true, isInitial = false)
 
         fun refresh() {
+            loadCalendar(forceRefresh = true)
             val ws = weekStart(_state.value.currentDate)
             viewModelScope.launch {
                 _state.update { it.copy(isRefreshing = true) }
@@ -250,7 +258,7 @@ class TimetableViewModel
                 (0..6).associate { i ->
                     val date = ws.plusDays(i.toLong())
                     val day = buildDay(date, dayOrder[i], timetable[dayOrder[i]] ?: emptyList())
-                    date to day.copy(holiday = holidays[date])
+                    date to day
                 }
             val offline = networkMonitor.isOnline.first().not()
             _state.update {
@@ -330,17 +338,23 @@ class TimetableViewModel
             }
         }
 
-        private fun loadHolidays() {
-            viewModelScope.launch {
-                val context = runCatching { authRepository.requireStudentRequestContext() }.getOrNull() ?: return@launch
-                val list =
-                    runCatching { calendarRepo.getHolidays(context.brId, context.academicYear) }
-                        .getOrDefault(emptyList())
-                holidays =
-                    list.mapNotNull { h ->
-                        runCatching { LocalDate.parse(h.date) to h.name }.getOrNull()
-                    }.toMap()
-            }
+        fun loadCalendar(forceRefresh: Boolean = false) {
+            val month = _state.value.currentDate.withDayOfMonth(1)
+            if (!forceRefresh && calendarMonth == month) return
+            calendarMonth = month
+            calendarJob?.cancel()
+            _state.update { it.copy(calendar = CalendarUiState()) }
+            calendarJob =
+                viewModelScope.launch {
+                    val user = authRepository.getUserInfo()
+                    val calendar =
+                        if (user == null) {
+                            CalendarUiState(isLoading = false, error = "Sign in to load the calendar")
+                        } else {
+                            calendarRepo.loadState(user, month, forceRefresh)
+                        }
+                    _state.update { it.copy(calendar = calendar) }
+                }
         }
 
         private fun weekStart(date: LocalDate): LocalDate = date.with(DayOfWeek.MONDAY)

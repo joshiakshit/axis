@@ -9,7 +9,7 @@ import kotlinx.serialization.json.JsonNames
 data class Holiday(
     @JsonNames("holiday_date", "date", "Date")
     val date: String = "",
-    @JsonNames("holiday_name", "name", "Name", "title")
+    @JsonNames("holiday_name", "name", "Name", "title", "description")
     val name: String = "",
     @JsonNames("holiday_type", "type", "Type")
     val type: String = "",
@@ -24,4 +24,5 @@ data class CalendarEvent(
     val title: String = "",
     @JsonNames("event_description", "description", "Description")
     val description: String = "",
+    val isHoliday: Boolean = false,
 )

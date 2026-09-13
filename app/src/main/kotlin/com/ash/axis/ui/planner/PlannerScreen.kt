@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ash.axis.ui.BottomSpacer
+import com.ash.axis.ui.CalendarSection
 import com.ash.core.ui.components.AxisDatePickerDialog
 import com.ash.core.ui.components.LoadingStateContainer
 import com.ash.core.ui.components.OfflineBanner
@@ -90,6 +91,10 @@ fun PlannerScreen(
                         onAdd = viewModel::addMarker,
                         onDelete = viewModel::deleteMarker,
                     )
+                }
+
+                item(key = "university_calendar", contentType = "calendar") {
+                    CalendarSection(data.calendar, onRefresh = { viewModel.loadCalendar(true) })
                 }
 
                 item(key = "simulator_grid", contentType = "simulator") {

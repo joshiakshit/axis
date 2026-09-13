@@ -6,6 +6,7 @@ import com.ash.axis.data.DataRefreshSignal
 import com.ash.axis.data.RefreshTrigger
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
+import com.ash.axis.data.repository.CalendarRepository
 import com.ash.axis.data.repository.SELECTED_SEMESTER_CLASS_KEY
 import com.ash.axis.data.repository.SELECTED_SEMESTER_YEAR_KEY
 import com.ash.axis.data.repository.StudentMarkerRepository
@@ -23,7 +24,9 @@ import com.ash.axis.domain.usecase.ProjectedSubject
 import com.ash.axis.domain.usecase.SubjectAttendance
 import com.ash.axis.domain.usecase.TimetableUseCase
 import com.ash.axis.domain.usecase.TodayAttendance
+import com.ash.axis.ui.CalendarUiState
 import com.ash.axis.ui.ErrorText
+import com.ash.axis.ui.loadState
 import com.ash.core.network.NetworkMonitor
 import com.ash.core.storage.PreferencesStore
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -78,6 +81,7 @@ data class PlannerUiState(
     val todayClassCount: Int = 0,
     val todayAttendance: TodayAttendance? = null,
     val isOffline: Boolean = false,
+    val calendar: CalendarUiState = CalendarUiState(),
 )
 
 @HiltViewModel
@@ -90,6 +94,7 @@ class PlannerViewModel
         private val timetableRepo: TimetableRepository,
         private val authRepository: AuthRepository,
         private val markerRepository: StudentMarkerRepository,
+        private val calendarRepository: CalendarRepository,
         private val attendanceUseCase: AttendanceUseCase,
         private val plannerUseCase: PlannerUseCase,
         private val timetableUseCase: TimetableUseCase,
@@ -104,6 +109,7 @@ class PlannerViewModel
 
         private var loadJob: Job? = null
         private var markerJob: Job? = null
+        private var calendarJob: Job? = null
         private var markerOwnerId: String? = null
         private var cachedTimetableContext: StudentRequestContext? = null
         private var cachedSemesterEnd: LocalDate? = null
@@ -119,6 +125,7 @@ class PlannerViewModel
 
         init {
             load(forceRefresh = false)
+            loadCalendar()
             observePreferences()
             viewModelScope.launch {
                 refreshSignal.signal.collect { event ->
@@ -131,7 +138,27 @@ class PlannerViewModel
             }
         }
 
-        fun refresh() = load(forceRefresh = true)
+        fun refresh() {
+            load(forceRefresh = true)
+            loadCalendar(forceRefresh = true)
+        }
+
+        fun loadCalendar(forceRefresh: Boolean = false) {
+            val month = _state.value.simulatorMonth
+            calendarJob?.cancel()
+            _state.update { it.copy(calendar = CalendarUiState()) }
+            calendarJob =
+                viewModelScope.launch {
+                    val user = authRepository.getUserInfo()
+                    val calendar =
+                        if (user == null) {
+                            CalendarUiState(isLoading = false, error = "Sign in to load the calendar")
+                        } else {
+                            calendarRepository.loadState(user, month, forceRefresh)
+                        }
+                    _state.update { it.copy(calendar = calendar) }
+                }
+        }
 
         private fun observePreferences() {
             viewModelScope.launch {
@@ -287,6 +314,7 @@ class PlannerViewModel
         fun shiftSimulatorMonth(delta: Int) {
             val newMonth = _state.value.simulatorMonth.plusMonths(delta.toLong())
             _state.update { it.copy(simulatorMonth = newMonth) }
+            loadCalendar()
             viewModelScope.launch {
                 ensureDateCoverage(newMonth.withDayOfMonth(newMonth.lengthOfMonth()))
                 _state.update { it.copy(dateTimetable = immutableDateTimetable) }
