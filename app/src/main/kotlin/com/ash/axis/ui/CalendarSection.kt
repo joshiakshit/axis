@@ -19,16 +19,19 @@ import com.ash.axis.ui.notifications.FeedStatus
 import com.ash.core.ui.theme.AppShapes
 import com.ash.core.ui.theme.cardColor
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @Composable
 internal fun CalendarSection(
     state: CalendarUiState,
     onRefresh: () -> Unit,
+    modifier: Modifier = Modifier,
     date: LocalDate? = null,
 ) {
     val entries = state.entries.filter { date == null || it.date == date.toString() }
-    Surface(shape = AppShapes.medium, color = cardColor(), modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(horizontal = 12.dp).heightIn(max = 200.dp).verticalScroll(rememberScrollState())) {
+    Surface(shape = AppShapes.medium, color = cardColor(), modifier = modifier.fillMaxWidth()) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp).heightIn(max = 200.dp).verticalScroll(rememberScrollState())) {
             Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                 Text("Events & holidays", modifier = Modifier.padding(top = 12.dp), style = MaterialTheme.typography.titleSmall)
                 TextButton(onClick = onRefresh, enabled = !state.isLoading) { Text("Refresh") }
@@ -40,7 +43,7 @@ internal fun CalendarSection(
                         if (state.fromCache) {
                             "No saved entries for this ${if (date == null) "month" else "day"}"
                         } else {
-                            "No events or holidays this ${if (date == null) "month" else "day"}"
+                            "No events or holidays ${if (date == null) "this month" else "on this day"}"
                         },
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -51,7 +54,12 @@ internal fun CalendarSection(
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(top = 6.dp),
                 )
-                if (date == null) Text(entry.date, style = MaterialTheme.typography.labelSmall)
+                if (date == null) {
+                    Text(
+                        LocalDate.parse(entry.date).format(DateTimeFormatter.ofPattern("d MMM yyyy", Locale.ENGLISH)),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
                 if (entry.description.isNotBlank() && entry.description != entry.title) {
                     Text(entry.description, style = MaterialTheme.typography.bodySmall)
                 }

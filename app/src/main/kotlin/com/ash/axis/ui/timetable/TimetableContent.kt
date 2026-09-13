@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -12,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.ash.axis.ui.CalendarSection
 import com.ash.core.ui.components.OfflineBanner
+import com.ash.core.ui.theme.AppDimens
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import java.time.LocalDate
@@ -69,7 +71,12 @@ internal fun TimetableContent(
             onSelect = viewModel::jumpTo,
         )
         Spacer(Modifier.height(8.dp))
-        CalendarSection(data.calendar, onRefresh = { viewModel.loadCalendar(true) }, date = data.currentDate)
+        CalendarSection(
+            data.calendar,
+            onRefresh = { viewModel.loadCalendar(true) },
+            modifier = Modifier.padding(horizontal = AppDimens.screenPadding),
+            date = data.currentDate,
+        )
         TimetableDayPager(
             anchor = anchor,
             pagerState = pagerState,
