@@ -25,7 +25,11 @@ system — attendance, timetable, grades, and QR attendance in one clean, offlin
 
 | Dashboard | Attendance | Timetable | Grades |
 | :---: | :---: | :---: | :---: |
-| ![Dashboard](docs/screenshots/dashboard.jpg) | ![Attendance](docs/screenshots/attendance.jpg) | ![Timetable](docs/screenshots/timetable.jpg) | ![Grades](docs/screenshots/grades.jpg) |
+| ![Dashboard](docs/screenshots/dashboard.png) | ![Attendance](docs/screenshots/attendance.jpg) | ![Timetable](docs/screenshots/timetable.png) | ![Grades](docs/screenshots/grades.jpg) |
+
+| Notifications | Notification details | Planner |
+| :---: | :---: | :---: |
+| ![Notifications](docs/screenshots/notifications.png) | ![Notification details](docs/screenshots/notification-details.png) | ![Planner](docs/screenshots/planner.png) |
 
 | Settings | Admin tools |
 | :---: | :---: |
@@ -39,6 +43,8 @@ system — attendance, timetable, grades, and QR attendance in one clean, offlin
 - **Attendance** — per-subject breakdown with **forecasting** ("how many can I skip / must I attend to hit my
   target?") and combined-attendance handling.
 - **Timetable & planner** — day-wise schedule with a clean weekly view.
+- **University calendar:** events and holidays in Timetable and Planner, with cached data and refresh timestamps.
+- **Notifications:** unread count, local read status, full messages, links, and visible refresh errors.
 - **Grades** — marks and performance insights per course.
 - **QR attendance** — scan the class QR, capture a selfie, and mark attendance (ML Kit + ZXing decode pipeline).
 - **Export** — share or save attendance/timetable as **PDF / CSV / ICS** straight to Downloads.
