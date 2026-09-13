@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.text.HtmlCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ash.axis.domain.model.AppNotification
@@ -131,6 +132,14 @@ private fun NotificationCard(
     notification: AppNotification,
     onClick: () -> Unit,
 ) {
+    val title =
+        remember(notification.title) {
+            HtmlCompat.fromHtml(notification.title, HtmlCompat.FROM_HTML_MODE_LEGACY).toString()
+        }
+    val message =
+        remember(notification.message) {
+            HtmlCompat.fromHtml(notification.message.replace("\n", "<br>"), HtmlCompat.FROM_HTML_MODE_LEGACY).toString()
+        }
     Surface(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -151,7 +160,7 @@ private fun NotificationCard(
                 Spacer(Modifier.height(2.dp))
             }
             Text(
-                notification.title.ifBlank { "Notification" },
+                title.ifBlank { "Notification" },
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 2,
@@ -160,7 +169,7 @@ private fun NotificationCard(
             if (notification.message.isNotBlank()) {
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    notification.message,
+                    message,
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 4,
@@ -170,7 +179,7 @@ private fun NotificationCard(
             if (notification.date.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    notification.date,
+                    formatNotificationDate(notification.date),
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 )

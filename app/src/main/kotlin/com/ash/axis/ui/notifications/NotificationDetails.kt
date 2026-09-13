@@ -25,6 +25,10 @@ internal fun NotificationDetails(
     onDismiss: () -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
+    val title =
+        remember(notification.title) {
+            HtmlCompat.fromHtml(notification.title, HtmlCompat.FROM_HTML_MODE_LEGACY).toString()
+        }
     val message =
         remember(notification.message) {
             HtmlCompat.fromHtml(notification.message.replace("\n", "<br>"), HtmlCompat.FROM_HTML_MODE_LEGACY)
@@ -40,10 +44,10 @@ internal fun NotificationDetails(
         }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(notification.title.ifBlank { "Notification" }) },
+        title = { Text(title.ifBlank { "Notification" }) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text(notification.date, style = MaterialTheme.typography.labelSmall)
+                Text(formatNotificationDate(notification.date), style = MaterialTheme.typography.labelSmall)
                 SelectionContainer { Text(message.toString()) }
                 links.forEach { url ->
                     TextButton(onClick = { uriHandler.openUri(url) }) { Text(url) }
