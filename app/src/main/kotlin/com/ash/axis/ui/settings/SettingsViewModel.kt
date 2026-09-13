@@ -47,7 +47,6 @@ data class SettingsUiState(
     val isClearing: Boolean = false,
     val isExporting: Boolean = false,
     val exportMessage: String? = null,
-    val deviceId: String = "",
     val isAdmin: Boolean = false,
 )
 
@@ -108,7 +107,6 @@ class SettingsViewModel
                         semesterOptions = semesters,
                         semesterError = semestersResult.exceptionOrNull()?.message,
                         combinedAttendance = combinedAttendance,
-                        deviceId = authRepository.getOrCreateDeviceId(),
                         isAdmin = axisSession.isAdmin(),
                     )
                 }
@@ -252,13 +250,6 @@ class SettingsViewModel
                 preferencesStore.putUserBoolean("combined_attendance", enabled)
                 _state.update { it.copy(combinedAttendance = enabled) }
             }
-        }
-
-        fun setDeviceId(id: String) {
-            val trimmed = id.trim()
-            if (trimmed.isBlank()) return
-            authRepository.setDeviceId(trimmed)
-            _state.update { it.copy(deviceId = trimmed) }
         }
 
         fun clearCache() {

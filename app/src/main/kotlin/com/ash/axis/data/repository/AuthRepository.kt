@@ -3,6 +3,7 @@ package com.ash.axis.data.repository
 import com.ash.axis.data.api.AuthApi
 import com.ash.axis.data.api.UserApi
 import com.ash.axis.data.config.RemoteConfigRepository
+import com.ash.axis.data.device.DeviceIdProvider
 import com.ash.axis.domain.model.JwtPayload
 import com.ash.axis.domain.model.StudentRequestContext
 import com.ash.axis.domain.model.UserInfo
@@ -12,7 +13,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import java.time.Duration
 import java.util.Base64
-import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -28,6 +28,7 @@ class AuthRepository
         private val authApi: AuthApi,
         private val userApi: UserApi,
         private val tokenManager: TokenManager,
+        private val deviceIdProvider: DeviceIdProvider,
         private val remoteConfig: RemoteConfigRepository,
         private val json: Json,
     ) {
@@ -116,17 +117,7 @@ class AuthRepository
         }
 
         fun getOrCreateDeviceId(): String {
-            tokenManager.getDeviceId()?.let { return it }
-            val deviceId = UUID.randomUUID().toString()
-            tokenManager.saveDeviceId(deviceId)
-            return deviceId
-        }
-
-        // Override the persisted device id. Use to match the official iCloudEMS app's device id so both
-        // stay bound to the same account (the server enforces one device per account). Survives logout.
-        fun setDeviceId(deviceId: String) {
-            val trimmed = deviceId.trim()
-            if (trimmed.isNotBlank()) tokenManager.saveDeviceId(trimmed)
+            return deviceIdProvider.get()
         }
 
         fun getUserInfo(): UserInfo? {

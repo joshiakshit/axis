@@ -292,7 +292,7 @@ class AttendanceRepository
             userSelfie: String = "",
             clientId: String = "",
         ): QrScanResult {
-            val collegeId = clientId.ifBlank { Tenants.GU.id }.uppercase()
+            val collegeId = clientId.ifBlank { Tenants.GU.id }
             authRepository.refreshTokenIfNeeded()
             val raw =
                 studentApi.requireBody(

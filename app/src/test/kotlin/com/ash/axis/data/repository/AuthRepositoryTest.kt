@@ -3,6 +3,7 @@ package com.ash.axis.data.repository
 import com.ash.axis.data.api.AuthApi
 import com.ash.axis.data.api.UserApi
 import com.ash.axis.data.config.RemoteConfigRepository
+import com.ash.axis.data.device.DeviceIdProvider
 import com.ash.axis.domain.model.LoginResponse
 import com.ash.axis.domain.model.LoginResponseData
 import com.ash.axis.domain.model.PersonalDetailsData
@@ -33,14 +34,15 @@ class AuthRepositoryTest {
     private val authApi = mockk<AuthApi>()
     private val userApi = mockk<UserApi>()
     private val tokenManager = mockk<TokenManager>()
+    private val deviceIdProvider = mockk<DeviceIdProvider>()
     private val remoteConfig = mockk<RemoteConfigRepository>()
     private val json = Json { ignoreUnknownKeys = true }
-    private val repository = AuthRepository(authApi, userApi, tokenManager, remoteConfig, json)
+    private val repository = AuthRepository(authApi, userApi, tokenManager, deviceIdProvider, remoteConfig, json)
 
     @Test
     fun `otp requests use the configured app version`() =
         runTest {
-            every { tokenManager.getDeviceId() } returns "device"
+            every { deviceIdProvider.get() } returns "device"
             every { remoteConfig.appVersion() } returns "3.0.9"
             coEvery { authApi.requestOtp(any()) } returns LoginResponse(LoginResponseData(username = "student"))
             val body = slot<Map<String, String>>()
@@ -55,7 +57,7 @@ class AuthRepositoryTest {
     fun `otp validation uses the configured app version`() =
         runTest {
             val token = jwt()
-            every { tokenManager.getDeviceId() } returns "device"
+            every { deviceIdProvider.get() } returns "device"
             every { remoteConfig.appVersion() } returns "3.0.9"
             every { tokenManager.setActiveAdmno(any()) } just Runs
             every { tokenManager.saveTokens(any(), any()) } just Runs
