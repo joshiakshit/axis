@@ -29,6 +29,8 @@ class UpdateViewModel
         val checking: StateFlow<Boolean> = mutableChecking.asStateFlow()
         private val mutableChecked = MutableStateFlow(false)
         val checked: StateFlow<Boolean> = mutableChecked.asStateFlow()
+        private val mutableCompletedVersion = MutableStateFlow(installer.consumeCompletedVersion())
+        val completedVersion: StateFlow<String?> = mutableCompletedVersion.asStateFlow()
 
         fun available(config: RemoteConfig): Boolean = installer.updateAvailable(config)
 
@@ -46,4 +48,8 @@ class UpdateViewModel
         }
 
         fun clearError() = installer.clearError()
+
+        fun dismissCompletedUpdate() {
+            mutableCompletedVersion.value = null
+        }
     }

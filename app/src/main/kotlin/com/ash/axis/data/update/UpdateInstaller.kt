@@ -24,12 +24,17 @@ import javax.inject.Singleton
 
 // Progress of an in-app update, surfaced to the update UI.
 data class UpdateState(
-    val downloading: Boolean = false,
+    val stage: UpdateStage = UpdateStage.IDLE,
     // 0..1 when the download size is known, -1 = indeterminate.
     val progress: Float = -1f,
-    val committing: Boolean = false,
     val error: String? = null,
 )
+
+enum class UpdateStage {
+    IDLE,
+    DOWNLOADING,
+    OPENING_INSTALLER,
+}
 
 // True one-tap update: downloads the APK named by remote config and hands it to the system PackageInstaller,
 // which shows the standard confirm dialog and swaps the app in place — no browser, no manual "open the file".
@@ -43,6 +48,7 @@ class UpdateInstaller
     ) {
         private val mutableState = MutableStateFlow(UpdateState())
         val state: StateFlow<UpdateState> = mutableState.asStateFlow()
+        private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 
         // An update exists when the backend advertises a newer build than the one installed and gives us a link.
         fun updateAvailable(config: RemoteConfig): Boolean =
@@ -60,15 +66,14 @@ class UpdateInstaller
 
         @Suppress("TooGenericExceptionCaught")
         suspend fun downloadAndInstall(url: String) {
-            if (mutableState.value.downloading) return
+            if (mutableState.value.stage != UpdateStage.IDLE) return
             if (!canInstall()) {
                 requestInstallPermission()
                 return
             }
-            mutableState.update { UpdateState(downloading = true) }
+            mutableState.update { UpdateState(stage = UpdateStage.DOWNLOADING) }
             try {
                 withContext(Dispatchers.IO) { stream(url) }
-                mutableState.update { it.copy(downloading = false, committing = true) }
             } catch (e: Exception) {
                 Log.w(TAG, "update failed", e)
                 mutableState.update { UpdateState(error = "Update failed. Please try again.") }
@@ -76,6 +81,19 @@ class UpdateInstaller
         }
 
         fun clearError() = mutableState.update { it.copy(error = null) }
+
+        fun onInstallFailed(cancelled: Boolean) {
+            preferences.edit().remove(KEY_UPDATE_FROM).apply()
+            val message = if (cancelled) "Installation was cancelled." else "Installation failed. Please try again."
+            mutableState.value = UpdateState(error = message)
+        }
+
+        fun consumeCompletedVersion(): String? {
+            val previousVersion = preferences.getInt(KEY_UPDATE_FROM, -1)
+            if (previousVersion < 0 || BuildConfig.VERSION_CODE <= previousVersion) return null
+            preferences.edit().remove(KEY_UPDATE_FROM).apply()
+            return BuildConfig.VERSION_NAME
+        }
 
         // Download the APK and hand it to the system. The commit result comes back asynchronously to
         // InstallReceiver, which launches the system confirm dialog.
@@ -101,6 +119,8 @@ class UpdateInstaller
                     pump(body, out, total)
                     session.fsync(out)
                 }
+                mutableState.update { it.copy(stage = UpdateStage.OPENING_INSTALLER, progress = 1f) }
+                preferences.edit().putInt(KEY_UPDATE_FROM, BuildConfig.VERSION_CODE).commit()
                 session.commit(InstallReceiver.statusSender(context, sessionId))
             }
         }
@@ -127,5 +147,7 @@ class UpdateInstaller
         private companion object {
             const val TAG = "UpdateInstaller"
             const val BUFFER = 64 * 1024
+            const val PREFERENCES = "axis_updates"
+            const val KEY_UPDATE_FROM = "update_from_version"
         }
     }

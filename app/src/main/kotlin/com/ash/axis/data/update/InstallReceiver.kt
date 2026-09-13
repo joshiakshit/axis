@@ -8,11 +8,17 @@ import android.content.IntentSender
 import android.content.pm.PackageInstaller
 import android.os.Build
 import android.util.Log
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 // Receives the PackageInstaller commit result. The one step that matters: when the installer needs the user
 // to confirm (STATUS_PENDING_USER_ACTION), it hands us the system confirm Intent — we must launch it, or the
-// install silently stalls. Success/failure are just logged (on success the app process is replaced anyway).
+// install silently stalls. A failure resets the in-app update state so the user can retry.
+@AndroidEntryPoint
 class InstallReceiver : BroadcastReceiver() {
+    @Inject
+    lateinit var updateInstaller: UpdateInstaller
+
     override fun onReceive(
         context: Context,
         intent: Intent,
@@ -31,7 +37,10 @@ class InstallReceiver : BroadcastReceiver() {
             }
 
             PackageInstaller.STATUS_SUCCESS -> Log.i(TAG, "update installed")
-            else -> Log.w(TAG, "install status=$status: ${intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)}")
+            else -> {
+                Log.w(TAG, "install status=$status: ${intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)}")
+                updateInstaller.onInstallFailed(cancelled = status == PackageInstaller.STATUS_FAILURE_ABORTED)
+            }
         }
     }
 

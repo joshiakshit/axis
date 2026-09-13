@@ -37,6 +37,7 @@ import com.ash.axis.ui.settings.AdminScreen
 import com.ash.axis.ui.settings.SettingsScreen
 import com.ash.axis.ui.timetable.TimetableScreen
 import com.ash.axis.ui.update.UpdateAvailableDialog
+import com.ash.axis.ui.update.UpdateCompletedDialog
 import com.ash.axis.ui.update.UpdateViewModel
 import com.ash.core.storage.PreferencesStore
 import com.ash.core.ui.navigation.AppScaffold
@@ -68,6 +69,7 @@ internal fun MainApp(
 
     val updateViewModel: UpdateViewModel = hiltViewModel()
     val updateConfig by updateViewModel.config.collectAsStateWithLifecycle()
+    val completedUpdate by updateViewModel.completedVersion.collectAsStateWithLifecycle()
     var updateDismissed by rememberSaveable { mutableStateOf(false) }
     // Dismissal is keyed on the notice text, so a *new* admin notice reappears after an old one was dismissed.
     var dismissedNotice by rememberSaveable { mutableStateOf("") }
@@ -189,8 +191,16 @@ internal fun MainApp(
         )
 
         // A newer build exists but this one still works — offer a one-tap update, dismissible for the session.
-        if (!updateDismissed && updateViewModel.available(updateConfig)) {
-            UpdateAvailableDialog(config = updateConfig, onDismiss = { updateDismissed = true })
+        if (completedUpdate == null && !updateDismissed && updateViewModel.available(updateConfig)) {
+            UpdateAvailableDialog(
+                config = updateConfig,
+                onDismiss = { updateDismissed = true },
+                viewModel = updateViewModel,
+            )
+        }
+
+        completedUpdate?.let { version ->
+            UpdateCompletedDialog(version = version, onDismiss = updateViewModel::dismissCompletedUpdate)
         }
 
         // Admin-set announcement banner (non-blocking), floating just above the bottom nav.

@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.CircularProgressIndicator
@@ -48,7 +49,13 @@ internal fun UpdateSettings(viewModel: UpdateViewModel = hiltViewModel()) {
                         Text("Checking…", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
 
-                available -> UpdateButton(url = config.updateUrl, label = "Update now")
+                available ->
+                    UpdateButton(
+                        url = config.updateUrl,
+                        label = "Update now",
+                        modifier = Modifier.fillMaxWidth(),
+                        wide = true,
+                    )
 
                 checked ->
                     Text(

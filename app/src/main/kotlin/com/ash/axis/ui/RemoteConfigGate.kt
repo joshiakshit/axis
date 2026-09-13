@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,6 +49,7 @@ fun RemoteConfigGate(
             UpdateRequiredScreen(
                 message = config.message.ifBlank { "A newer version of Axis is required to continue." },
                 updateUrl = config.updateUrl,
+                versionName = config.latestVersionName,
                 onRetry = onRetry,
             )
 
@@ -58,13 +61,26 @@ fun RemoteConfigGate(
 private fun UpdateRequiredScreen(
     message: String,
     updateUrl: String,
+    versionName: String,
     onRetry: () -> Unit,
 ) {
     GateScaffold(title = "Update required", message = message) {
-        if (updateUrl.isNotBlank()) {
-            UpdateButton(url = updateUrl, label = "Update now")
+        if (versionName.isNotBlank()) {
+            Text(
+                "Axis $versionName",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
         }
-        TextButton(onClick = onRetry) { Text("Retry") }
+        if (updateUrl.isNotBlank()) {
+            UpdateButton(
+                url = updateUrl,
+                label = "Download and update",
+                modifier = Modifier.fillMaxWidth(),
+                wide = true,
+            )
+        }
+        TextButton(onClick = onRetry) { Text("Check again") }
     }
 }
 
@@ -86,26 +102,37 @@ private fun GateScaffold(
     actions: @Composable () -> Unit,
 ) {
     Box(
-        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(24.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+        Surface(
+            modifier = Modifier.fillMaxWidth().widthIn(max = 440.dp),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            tonalElevation = 2.dp,
         ) {
-            Text(
-                title,
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onBackground,
-            )
-            Text(
-                message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
-            actions()
+            Column(
+                modifier = Modifier.padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                actions()
+            }
         }
     }
 }
