@@ -35,8 +35,8 @@ internal class StudentApiParser(
         }
 
         val code = response.code()
-        val errorBody = response.errorBody()?.string()
-        Log.d("StudentApi", "[$endpoint] HTTP $code body=${errorBody?.trim()?.take(500)}")
+        response.errorBody()?.close()
+        Log.d("StudentApi", "[$endpoint] HTTP $code")
         if (code == 401) throw SessionExpiredException()
         throw IcloudServerException(code, "$endpoint failed: HTTP $code")
     }
