@@ -25,13 +25,14 @@ Finish Notifications, add university events and holidays, and clean up reliabili
 - Android: assembleDebug, assembleRelease, test, ktlintCheck, and detekt passed. App unit tests: 117, no failures. Core tests also passed.
 - Backend: 38 tests passed; typecheck passed.
 - Signed 1.1.3 build installed over the existing phone app without clearing data.
+- Published signed 1.1.4 / code 12 as an optional update. Release tests, ktlintCheck, detekt, and assembleRelease passed. The downloaded APK SHA256 matches the local release. Live minimum supported code remains 10 (1.1.2).
 - Live notifications loaded. Details and links display correctly. Pull-to-refresh updates timestamps. Read state survives refresh and app updates. Planner shows the September holiday.
 
 ## Open work
 
 - Resume the download after returning from Android's unknown-app installation permission page.
 - Confirm one real classroom QR submission and its final server response. Scanner access alone does not complete that check.
-- This task did not publish an APK or deploy the backend migration. The existing version metadata is 1.1.3 / code 11.
+- The backend migration has not been deployed.
 - Keep the user's AGENTS.md untracked.
 
 ## Next step
