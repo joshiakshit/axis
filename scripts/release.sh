@@ -11,6 +11,8 @@
 #   scripts/release.sh --force         # ALSO raise the force-update floor (blocks old builds until updated)
 #   scripts/release.sh 1.2.0 --force   # both
 #   scripts/release.sh --check         # run the full test/lint gate before building
+#   scripts/release.sh 1.2.0 --prepare # build the release APK without uploading or advertising it
+#   scripts/release.sh --publish-prepared --sha256=HASH # publish the prepared APK after review
 #
 # Requires in local.properties:  REMOTE_CONFIG_URL, ADMIN_TOKEN  (and the RELEASE_* signing keys for a real
 # distributable build). Requires an R2 bucket bound in the Worker (see backend/README.md → One-tap updates).
@@ -31,42 +33,70 @@ ADMIN_TOKEN="$(prop ADMIN_TOKEN)"
 [ -n "$ADMIN_TOKEN" ] || { echo "✗ ADMIN_TOKEN missing from local.properties (wrangler secret value)"; exit 1; }
 
 # --- args ---------------------------------------------------------------------------------------------
-FORCE=0; CHECK=0; NEW_NAME=""; NEW_CODE=""
+FORCE=0; CHECK=0; PREPARE=0; PUBLISH_PREPARED=0; EXPECTED_SHA256=""; NEW_NAME=""; NEW_CODE=""
 for a in "$@"; do
   case "$a" in
     --force) FORCE=1 ;;
     --check) CHECK=1 ;;
+    --prepare) PREPARE=1 ;;
+    --publish-prepared) PUBLISH_PREPARED=1 ;;
+    --sha256=*) EXPECTED_SHA256="${a#*=}" ;;
     --code=*) NEW_CODE="${a#*=}" ;;
     -*)      echo "unknown flag: $a"; exit 1 ;;
     *)       NEW_NAME="$a" ;;
   esac
 done
+[ "$PREPARE" = 0 ] || [ "$PUBLISH_PREPARED" = 0 ] || { echo "--prepare and --publish-prepared cannot be combined"; exit 1; }
+if [ "$PUBLISH_PREPARED" = 1 ]; then
+  [ -z "$NEW_NAME" ] && [ -z "$NEW_CODE" ] && [ "$CHECK" = 0 ] || {
+    echo "--publish-prepared uses the current version and APK"; exit 1;
+  }
+  [ -n "$EXPECTED_SHA256" ] || { echo "--publish-prepared requires --sha256"; exit 1; }
+elif [ -n "$EXPECTED_SHA256" ]; then
+  echo "--sha256 requires --publish-prepared"; exit 1
+fi
 
 # --- bump version.properties --------------------------------------------------------------------------
 OLD_CODE="$(grep -E '^VERSION_CODE=' version.properties | cut -d= -f2- | tr -d '\r')"
 OLD_NAME="$(grep -E '^VERSION_NAME=' version.properties | cut -d= -f2- | tr -d '\r')"
-[ -n "$NEW_CODE" ] || NEW_CODE=$(( OLD_CODE + 1 ))
-case "$NEW_CODE" in
-  *[!0-9]*|'') echo "version code must be a positive integer"; exit 1 ;;
-esac
-[ "$NEW_CODE" -gt "$OLD_CODE" ] || { echo "version code must be greater than $OLD_CODE"; exit 1; }
-if [ -z "$NEW_NAME" ]; then
-  IFS=. read -r MA MI PA <<<"$OLD_NAME"
-  NEW_NAME="${MA:-1}.${MI:-0}.$(( ${PA:-0} + 1 ))"   # auto patch-bump
+if [ "$PUBLISH_PREPARED" = 1 ]; then
+  NEW_CODE="$OLD_CODE"
+  NEW_NAME="$OLD_NAME"
+else
+  [ -n "$NEW_CODE" ] || NEW_CODE=$(( OLD_CODE + 1 ))
+  case "$NEW_CODE" in
+    *[!0-9]*|'') echo "version code must be a positive integer"; exit 1 ;;
+  esac
+  [ "$NEW_CODE" -gt "$OLD_CODE" ] || { echo "version code must be greater than $OLD_CODE"; exit 1; }
+  if [ -z "$NEW_NAME" ]; then
+    IFS=. read -r MA MI PA <<<"$OLD_NAME"
+    NEW_NAME="${MA:-1}.${MI:-0}.$(( ${PA:-0} + 1 ))"   # auto patch-bump
+  fi
+  printf 'VERSION_CODE=%s\nVERSION_NAME=%s\n' "$NEW_CODE" "$NEW_NAME" > version.properties
+  echo "▸ version  $OLD_NAME ($OLD_CODE) → $NEW_NAME ($NEW_CODE)"
 fi
-printf 'VERSION_CODE=%s\nVERSION_NAME=%s\n' "$NEW_CODE" "$NEW_NAME" > version.properties
-echo "▸ version  $OLD_NAME ($OLD_CODE) → $NEW_NAME ($NEW_CODE)"
 
 # --- build ---------------------------------------------------------------------------------------------
-if [ "$CHECK" = 1 ]; then
-  echo "▸ running test + lint gate…"
-  "$GRADLE" :app:testDebugUnitTest ktlintCheck detekt -q
+if [ "$PUBLISH_PREPARED" = 0 ]; then
+  if [ "$CHECK" = 1 ]; then
+    echo "▸ running test + lint gate…"
+    "$GRADLE" :app:testDebugUnitTest ktlintCheck detekt -q
+  fi
+  echo "▸ building signed release APK…"
+  "$GRADLE" :app:assembleRelease -q
 fi
-echo "▸ building signed release APK…"
-"$GRADLE" :app:assembleRelease -q
 APK="app/build/outputs/apk/release/app-release.apk"
 [ -f "$APK" ] || { echo "✗ APK not found at $APK"; exit 1; }
 echo "  $(du -h "$APK" | cut -f1)  $APK"
+if [ "$PUBLISH_PREPARED" = 1 ]; then
+  ACTUAL_SHA256="$(sha256sum "$APK" | cut -d' ' -f1)"
+  [ "${ACTUAL_SHA256,,}" = "${EXPECTED_SHA256,,}" ] || { echo "✗ prepared APK hash does not match"; exit 1; }
+fi
+
+if [ "$PREPARE" = 1 ]; then
+  echo "✓ prepared $NEW_NAME ($NEW_CODE) — $APK"
+  exit 0
+fi
 
 # --- upload to R2 via the Worker ----------------------------------------------------------------------
 echo "▸ uploading APK to $BASE/v1/apk …"

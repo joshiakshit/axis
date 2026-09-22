@@ -146,6 +146,8 @@ scripts/release.sh              # bump patch (1.0.0 → 1.0.1), build, upload, a
 scripts/release.sh 1.2.0        # explicit version name
 scripts/release.sh --force      # ALSO raise the force-update floor (blocks older builds)
 scripts/release.sh --check      # run the test/lint gate first
+scripts/release.sh 1.2.0 --prepare # build the APK without uploading or advertising it
+scripts/release.sh --publish-prepared --sha256=HASH # publish the reviewed APK
 ```
 
 It bumps `version.properties`, builds the signed APK, uploads it to the Worker's R2 store
