@@ -4,7 +4,6 @@ import android.os.Build
 import android.util.Log
 import com.ash.axis.BuildConfig
 import com.ash.axis.data.api.AxisBackendApi
-import com.ash.axis.data.config.RemoteConfig
 import com.ash.axis.data.device.DeviceIdProvider
 import com.ash.core.security.TokenManager
 import com.ash.core.storage.PreferencesStore
@@ -27,12 +26,8 @@ data class Access(
     val checking: Boolean,
 )
 
-// Admin verdict applied to a governed user. ALLOW → approved, KICK → pending (re-login re-requests),
-// BAN → banned (survives re-login).
-enum class UserAction { ALLOW, KICK, BAN }
-
 // Client half of the governance layer. Calls POST /v1/session for the active account, caches the result
-// per-admno, and hands the gate/admin UI the current access + admin session token. `api` is null when the
+// per-admno, and hands the gate the current access decision. `api` is null when the
 // build has no REMOTE_CONFIG_URL, which disables governance entirely (the app runs ungoverned).
 @Singleton
 class AxisSessionRepository
@@ -51,11 +46,6 @@ class AxisSessionRepository
 
         @Volatile
         private var token: String? = null
-
-        fun isAdmin(): Boolean {
-            val access = mutableState.value
-            return access.status == AxisSession.STATUS_APPROVED && access.role == AxisSession.ROLE_ADMIN
-        }
 
         private fun authHeader(): String? = token?.let { "Bearer $it" }
 
@@ -96,37 +86,6 @@ class AxisSessionRepository
                 deviceId = deviceIdProvider.get(),
             )
 
-        suspend fun listUsers(): List<AdminUser> {
-            val client = api ?: return emptyList()
-            val auth = authHeader() ?: return emptyList()
-            return client.listUsers(auth).users
-        }
-
-        suspend fun setUserStatus(
-            admno: String,
-            action: UserAction,
-        ): AdminUser? {
-            val client = api ?: return null
-            val auth = authHeader() ?: return null
-            return when (action) {
-                UserAction.ALLOW -> client.allow(admno, auth)
-                UserAction.KICK -> client.kick(admno, auth)
-                UserAction.BAN -> client.ban(admno, auth)
-            }
-        }
-
-        suspend fun approveAll(): Int? {
-            val client = api ?: return null
-            val auth = authHeader() ?: return null
-            return client.approveAll(auth).approved
-        }
-
-        suspend fun getHealth(): HealthResponse? {
-            val client = api ?: return null
-            val auth = authHeader() ?: return null
-            return client.health(auth)
-        }
-
         // Fire-and-forget usage report. No session token yet (governance disabled or first launch) → silently skip.
         @Suppress("TooGenericExceptionCaught")
         suspend fun logEvents(events: List<UsageEvent>) {
@@ -135,20 +94,6 @@ class AxisSessionRepository
             if (events.isEmpty()) return
             runCatching { client.events(auth, EventsRequest(events)) }
                 .onFailure { Log.w("AxisSession", "usage report failed", it) }
-        }
-
-        // ---- Admin-only remote config (force-update floor, latest build, kill-switch) --------------------
-
-        suspend fun getConfig(): RemoteConfig? {
-            val client = api ?: return null
-            val auth = authHeader() ?: return null
-            return client.getConfig(auth)
-        }
-
-        suspend fun putConfig(patch: ConfigPatch): RemoteConfig? {
-            val client = api ?: return null
-            val auth = authHeader() ?: return null
-            return client.putConfig(auth, patch)
         }
 
         private fun publish(session: AxisSession) {

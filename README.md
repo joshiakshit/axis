@@ -160,8 +160,8 @@ app offers the update. Prerequisites: `REMOTE_CONFIG_URL` and `ADMIN_TOKEN` in `
 
 ## Admin & governance
 
-The same APK ships to everyone; when the **owner** logs in they get an **Admin tools** page (Settings → Admin
-tools). From their phone the owner can:
+Axis keeps user access checks and usage reporting in the client. Administrative controls live in the separate
+Axis Admin app. From that app the owner can:
 
 - **Approve / Kick / Ban** users (kick → back to pending; ban → hard block that survives re-login), or
   **Approve all** pending at once, or auto-approve by **admno prefix**.

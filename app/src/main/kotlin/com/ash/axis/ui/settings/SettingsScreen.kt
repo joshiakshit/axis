@@ -30,7 +30,6 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = hiltViewModel(),
     onLogout: () -> Unit = {},
-    onOpenAdmin: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -83,19 +82,6 @@ fun SettingsScreen(
                 onShareTimetable = viewModel::exportTimetable,
                 onDownloadTimetable = viewModel::downloadTimetable,
             )
-        }
-
-        if (state.isAdmin) {
-            item { SectionLabel("ADMIN") }
-            item {
-                SettingsCard {
-                    ActionRow(
-                        label = "Admin tools",
-                        subtitle = "Approve users, usage, force-update, kill-switch",
-                        onClick = onOpenAdmin,
-                    )
-                }
-            }
         }
 
         item { SectionLabel("SECURITY & DATA") }

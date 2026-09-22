@@ -1,7 +1,6 @@
 package com.ash.axis.data.session
 
 import com.ash.axis.data.api.AxisBackendApi
-import com.ash.axis.data.config.RemoteConfig
 import com.ash.axis.data.device.DeviceIdProvider
 import com.ash.core.security.TokenManager
 import com.ash.core.storage.PreferencesStore
@@ -17,7 +16,6 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 private const val KEY = "axis_session"
@@ -35,7 +33,6 @@ class AxisSessionRepositoryTest {
         runTest {
             val r = repo(null)
             assertFalse(r.state.value.enabled)
-            assertFalse(r.isAdmin())
 
             r.refresh()
 
@@ -54,40 +51,20 @@ class AxisSessionRepositoryTest {
         }
 
     @Test
-    fun `refresh publishes approved admin, persists, and enables admin calls`() =
+    fun `refresh persists approved session without admin actions`() =
         runTest {
             val api = mockk<AxisBackendApi>()
             every { tokenManager.getAccessToken() } returns "icloud-token"
             coEvery { prefs.putUserString(KEY, any()) } just Runs
             coEvery { api.session(any()) } returns
                 AxisSession(status = "approved", role = "admin", admno = "21000", sessionToken = "sess-tok")
-            coEvery { api.listUsers("Bearer sess-tok") } returns UsersResponse(listOf(AdminUser("21001")))
             val r = repo(api)
 
             r.refresh()
 
             assertEquals("approved", r.state.value.status)
-            assertTrue(r.isAdmin())
             coVerify { prefs.putUserString(KEY, any()) }
             coVerify { api.session(match { it.deviceId == "compatible-device-id" }) }
-            // The admin session token was captured, so authorized calls succeed.
-            assertEquals("21001", r.listUsers().single().admno)
-        }
-
-    @Test
-    fun `putConfig sends the patch with the admin bearer`() =
-        runTest {
-            val api = mockk<AxisBackendApi>()
-            every { tokenManager.getAccessToken() } returns "icloud-token"
-            coEvery { prefs.putUserString(KEY, any()) } just Runs
-            coEvery { api.session(any()) } returns AxisSession(status = "approved", role = "admin", sessionToken = "sess-tok")
-            val patch = ConfigPatch(minSupportedVersionCode = 12)
-            coEvery { api.putConfig("Bearer sess-tok", patch) } returns RemoteConfig(minSupportedVersionCode = 12)
-            val r = repo(api)
-            r.refresh()
-
-            assertEquals(12, r.putConfig(patch)?.minSupportedVersionCode)
-            coVerify { api.putConfig("Bearer sess-tok", patch) }
         }
 
     @Test
@@ -113,25 +90,6 @@ class AxisSessionRepositoryTest {
 
             r.hydrate()
 
-            assertTrue(r.isAdmin())
             assertEquals("approved", r.state.value.status)
-        }
-
-    @Test
-    fun `setUserStatus routes to allow or kick with the admin bearer`() =
-        runTest {
-            val api = mockk<AxisBackendApi>()
-            every { tokenManager.getAccessToken() } returns "icloud-token"
-            coEvery { prefs.putUserString(KEY, any()) } just Runs
-            coEvery { api.session(any()) } returns AxisSession(status = "approved", role = "admin", sessionToken = "sess-tok")
-            coEvery { api.allow("21001", "Bearer sess-tok") } returns AdminUser("21001", status = "approved")
-            coEvery { api.kick("21001", "Bearer sess-tok") } returns AdminUser("21001", status = "pending")
-            coEvery { api.ban("21001", "Bearer sess-tok") } returns AdminUser("21001", status = "banned")
-            val r = repo(api)
-            r.refresh()
-
-            assertEquals("approved", r.setUserStatus("21001", UserAction.ALLOW)?.status)
-            assertEquals("pending", r.setUserStatus("21001", UserAction.KICK)?.status)
-            assertEquals("banned", r.setUserStatus("21001", UserAction.BAN)?.status)
         }
 }
