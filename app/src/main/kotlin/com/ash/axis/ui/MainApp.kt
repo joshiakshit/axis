@@ -198,6 +198,7 @@ internal fun MainApp(
             onShowMessage = qrViewModel::showMessage,
             onClearMessage = qrViewModel::clearMessage,
             onDismiss = { showQrFlow = false },
+            diagnostics = qrViewModel.diagnostics,
         )
 
         // A newer build exists but this one still works — offer a one-tap update, dismissible for the session.

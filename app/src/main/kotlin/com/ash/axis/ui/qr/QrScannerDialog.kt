@@ -41,9 +41,10 @@ import java.util.Locale
 @Suppress("LongMethod")
 @Composable
 internal fun QrScanScreen(
-    onQrScanned: (String) -> Unit,
+    onQrScanned: (String, String) -> Unit,
     onCancel: () -> Unit,
     onError: (String) -> Unit,
+    diagnostics: QrDiagnostics,
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     var zoomRatio by remember { mutableStateOf(1f) }
@@ -68,9 +69,11 @@ internal fun QrScanScreen(
             QrCameraPreview(
                 lifecycleOwner = lifecycleOwner,
                 digitalZoom = digitalZoom,
+                opticalZoom = opticalZoom,
                 onQrScanned = onQrScanned,
                 onError = onError,
                 onCameraBound = { camera -> cameraRef = camera },
+                diagnostics = diagnostics,
                 onPinchZoom = { scaleFactor ->
                     val newZoom = (zoomRatio * scaleFactor).coerceIn(1f, sliderMax)
                     zoomRatio = newZoom
@@ -96,6 +99,8 @@ internal fun QrScanScreen(
                 step = "Step 2 of 2 · Scan QR",
                 onClose = onCancel,
             )
+
+            QrDiagnosticOverlay(diagnostics, Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 100.dp))
 
             Column(
                 modifier =

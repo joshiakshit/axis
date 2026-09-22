@@ -291,28 +291,32 @@ class AttendanceRepository
             longitude: Double?,
             userSelfie: String = "",
             clientId: String = "",
+            onSubmissionStart: () -> Unit = {},
         ): QrScanResult {
             val collegeId = clientId.ifBlank { Tenants.GU.id }
             authRepository.refreshTokenIfNeeded()
+            val body =
+                studentApi.jsonBody(
+                    "data" to rawQr,
+                    "usermasterkey" to admno,
+                    "lastmodifiedby" to email,
+                    "latitude" to latitude?.let { "'$it'" }.orEmpty(),
+                    "longitude" to longitude?.let { "'$it'" }.orEmpty(),
+                    "userselfie" to userSelfie,
+                    "br_id" to brId,
+                    "collegeid" to collegeId,
+                )
+            val startedAt = System.nanoTime()
+            onSubmissionStart()
+            val response = qrApi.sendScanQR(body)
+            val durationMs = (System.nanoTime() - startedAt) / 1_000_000
             val raw =
                 studentApi.requireBody(
                     endpoint = "sendScanQR",
-                    response =
-                        qrApi.sendScanQR(
-                            studentApi.jsonBody(
-                                "data" to rawQr,
-                                "usermasterkey" to admno,
-                                "lastmodifiedby" to email,
-                                "latitude" to latitude?.let { "'$it'" }.orEmpty(),
-                                "longitude" to longitude?.let { "'$it'" }.orEmpty(),
-                                "userselfie" to userSelfie,
-                                "br_id" to brId,
-                                "collegeid" to collegeId,
-                            ),
-                        ),
+                    response = response,
                 ).string()
 
-            return qrResultParser.parse(raw, defaultSuccess = true)
+            return qrResultParser.parse(raw, defaultSuccess = true).copy(httpStatus = response.code(), httpDurationMs = durationMs)
         }
 
         suspend fun clearCache() {

@@ -7,6 +7,8 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.Box
@@ -72,8 +74,10 @@ internal fun FrontCameraPreview(
 internal fun QrCameraPreview(
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
     digitalZoom: Float,
-    onQrScanned: (String) -> Unit,
+    opticalZoom: Float,
+    onQrScanned: (String, String) -> Unit,
     onError: (String) -> Unit,
+    diagnostics: QrDiagnostics,
     onCameraBound: (androidx.camera.core.Camera) -> Unit = {},
     onPinchZoom: (Float) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -81,7 +85,9 @@ internal fun QrCameraPreview(
     val context = LocalContext.current
     val analyzerExecutor = remember { Executors.newSingleThreadExecutor() }
     val cropZoomRef = remember { AtomicReference(1f) }
+    val opticalZoomRef = remember { AtomicReference(1f) }
     cropZoomRef.set(digitalZoom)
+    opticalZoomRef.set(opticalZoom)
     DisposableEffect(Unit) {
         onDispose {
             unbindCamera(context)
@@ -108,9 +114,11 @@ internal fun QrCameraPreview(
                         previewView = this,
                         analyzerExecutor = analyzerExecutor,
                         zoomProvider = { cropZoomRef.get() },
+                        opticalZoomProvider = { opticalZoomRef.get() },
                         onQrScanned = onQrScanned,
                         onError = onError,
                         onCameraBound = onCameraBound,
+                        diagnostics = diagnostics,
                     )
                     val scaleDetector =
                         android.view.ScaleGestureDetector(
@@ -185,9 +193,11 @@ private fun bindQrCamera(
     previewView: PreviewView,
     analyzerExecutor: ExecutorService,
     zoomProvider: () -> Float,
-    onQrScanned: (String) -> Unit,
+    opticalZoomProvider: () -> Float,
+    onQrScanned: (String, String) -> Unit,
     onError: (String) -> Unit,
     onCameraBound: (androidx.camera.core.Camera) -> Unit = {},
+    diagnostics: QrDiagnostics,
 ) {
     val cameraProviderFuture = ProcessCameraProvider.getInstance(previewView.context)
     val didScan = AtomicBoolean(false)
@@ -199,22 +209,30 @@ private fun bindQrCamera(
                     CameraSelector.Builder()
                         .requireLensFacing(CameraSelector.LENS_FACING_BACK)
                         .build()
+                val resolutionSelector =
+                    ResolutionSelector.Builder()
+                        .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
+                        .build()
                 val preview =
-                    CameraPreview.Builder().build().also {
-                        it.setSurfaceProvider(previewView.surfaceProvider)
-                    }
+                    CameraPreview.Builder()
+                        .setResolutionSelector(resolutionSelector)
+                        .build().also {
+                            it.setSurfaceProvider(previewView.surfaceProvider)
+                        }
                 val analysis =
                     ImageAnalysis.Builder()
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        .setResolutionSelector(resolutionSelector)
                         .build()
                 val reader = createQrReader()
                 analysis.setAnalyzer(analyzerExecutor) { image ->
-                    analyzeQrFrame(image, reader, didScan, zoomProvider()) { value ->
-                        previewView.post { onQrScanned(value) }
+                    analyzeQrFrame(image, reader, didScan, zoomProvider(), opticalZoomProvider(), diagnostics) { value, decoder ->
+                        previewView.post { onQrScanned(value, decoder) }
                     }
                 }
                 cameraProvider.unbindAll()
                 val camera = cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, analysis)
+                diagnostics.stage(QrStage.CAMERA_BIND)
                 onCameraBound(camera)
             }.onFailure {
                 onError("QR camera unavailable. Try again after closing other camera screens.")
@@ -248,11 +266,28 @@ private fun analyzeQrFrame(
     reader: MultiFormatReader,
     didScan: AtomicBoolean,
     digitalZoom: Float,
-    onQrScanned: (String) -> Unit,
+    opticalZoom: Float,
+    diagnostics: QrDiagnostics,
+    onQrScanned: (String, String) -> Unit,
 ) {
     if (didScan.get()) {
         image.close()
         return
+    }
+
+    diagnostics.frame(image.width, image.height, image.imageInfo.rotationDegrees, opticalZoom, digitalZoom)
+    val startedAt = System.nanoTime()
+
+    fun elapsedMs(): Long = (System.nanoTime() - startedAt) / 1_000_000
+
+    fun decodeWithZxing() {
+        val decoded = decodeQrImageZxing(image, reader, digitalZoom)
+        if (decoded != null && didScan.compareAndSet(false, true)) {
+            diagnostics.recognized(decoded.second, elapsedMs())
+            onQrScanned(decoded.first, decoded.second)
+        } else if (decoded == null) {
+            diagnostics.decodeMiss("zxing", elapsedMs())
+        }
     }
 
     val mediaImage = image.image
@@ -262,27 +297,21 @@ private fun analyzeQrFrame(
             .addOnSuccessListener { barcodes ->
                 val value = barcodes.firstOrNull { !it.rawValue.isNullOrBlank() }?.rawValue
                 if (value != null && didScan.compareAndSet(false, true)) {
-                    onQrScanned(value)
+                    diagnostics.recognized("mlkit", elapsedMs())
+                    onQrScanned(value, "mlkit")
                 } else if (value == null) {
-                    val decoded = decodeQrImageZxing(image, reader, digitalZoom)
-                    if (!decoded.isNullOrBlank() && didScan.compareAndSet(false, true)) {
-                        onQrScanned(decoded)
-                    }
+                    diagnostics.decodeMiss("mlkit", elapsedMs())
+                    decodeWithZxing()
                 }
             }
             .addOnFailureListener {
-                val decoded = decodeQrImageZxing(image, reader, digitalZoom)
-                if (!decoded.isNullOrBlank() && didScan.compareAndSet(false, true)) {
-                    onQrScanned(decoded)
-                }
+                diagnostics.decodeMiss("mlkit_error", elapsedMs())
+                decodeWithZxing()
             }
             .addOnCompleteListener { image.close() }
     } else {
         try {
-            val decoded = decodeQrImageZxing(image, reader, digitalZoom)
-            if (!decoded.isNullOrBlank() && didScan.compareAndSet(false, true)) {
-                onQrScanned(decoded)
-            }
+            decodeWithZxing()
         } finally {
             image.close()
         }
@@ -293,7 +322,7 @@ private fun decodeQrImageZxing(
     image: ImageProxy,
     reader: MultiFormatReader,
     digitalZoom: Float,
-): String? {
+): Pair<String, String>? {
     val zoom = digitalZoom.coerceAtLeast(1f)
     val cropWidth = (image.width / zoom).toInt().coerceIn(1, image.width)
     val cropHeight = (image.height / zoom).toInt().coerceIn(1, image.height)
@@ -311,12 +340,12 @@ private fun decodeQrImageZxing(
             cropHeight,
             false,
         )
-    return decodeQrSource(source, reader, ::HybridBinarizer)
-        ?: decodeQrSource(source, reader, ::GlobalHistogramBinarizer)
+    return decodeQrSource(source, reader, ::HybridBinarizer)?.let { it to "zxing_hybrid" }
+        ?: decodeQrSource(source, reader, ::GlobalHistogramBinarizer)?.let { it to "zxing_global" }
         ?: if (source.isRotateSupported) {
             val rotated = source.rotateCounterClockwise()
-            decodeQrSource(rotated, reader, ::HybridBinarizer)
-                ?: decodeQrSource(rotated, reader, ::GlobalHistogramBinarizer)
+            decodeQrSource(rotated, reader, ::HybridBinarizer)?.let { it to "zxing_hybrid_rotated" }
+                ?: decodeQrSource(rotated, reader, ::GlobalHistogramBinarizer)?.let { it to "zxing_global_rotated" }
         } else {
             null
         }

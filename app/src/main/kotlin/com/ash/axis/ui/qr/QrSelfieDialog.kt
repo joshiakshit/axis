@@ -45,8 +45,10 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 internal fun SelfieCaptureScreen(
     onCapture: (String) -> Unit,
     onAttachImage: () -> Unit,
+    onRecognitionOnly: (() -> Unit)?,
     onCancel: () -> Unit,
     onError: (String) -> Unit,
+    diagnostics: QrDiagnostics,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -71,6 +73,8 @@ internal fun SelfieCaptureScreen(
                 step = "Step 1 of 2 · Selfie",
                 onClose = onCancel,
             )
+
+            QrDiagnosticOverlay(diagnostics, Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 100.dp))
 
             Column(
                 modifier =
@@ -101,6 +105,7 @@ internal fun SelfieCaptureScreen(
                 TextButton(onClick = onAttachImage) {
                     Text("Upload instead", color = Color.White)
                 }
+                QrRecognitionButton(onRecognitionOnly)
             }
         }
     }
@@ -155,10 +160,11 @@ internal fun BoxScope.CameraTopBar(
 }
 
 @Composable
-internal fun CameraHandoffScreen() {
+internal fun CameraHandoffScreen(diagnostics: QrDiagnostics) {
     Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(color = Color.White.copy(alpha = 0.9f), strokeWidth = 2.dp)
+            QrDiagnosticOverlay(diagnostics, Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 100.dp))
         }
     }
 }

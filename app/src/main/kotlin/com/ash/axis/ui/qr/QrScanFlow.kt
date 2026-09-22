@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import com.ash.axis.BuildConfig
 import kotlinx.coroutines.delay
 
 private enum class CameraAction { Selfie, Qr }
@@ -23,7 +24,7 @@ private const val CAMERA_HANDOFF_DELAY_MS = 350L
 
 @Suppress("LongMethod", "CyclomaticComplexMethod", "LongParameterList")
 @Composable
-fun QrScanFlow(
+internal fun QrScanFlow(
     visible: Boolean,
     isSubmitting: Boolean,
     message: String?,
@@ -32,12 +33,14 @@ fun QrScanFlow(
     onShowMessage: (String) -> Unit,
     onClearMessage: () -> Unit,
     onDismiss: () -> Unit,
+    diagnostics: QrDiagnostics,
 ) {
     var showSelfie by remember { mutableStateOf(false) }
     var showScanner by remember { mutableStateOf(false) }
     var pendingScanner by remember { mutableStateOf(false) }
     var qrSelfie by remember { mutableStateOf<String?>(null) }
     var pendingCameraAction by remember { mutableStateOf<CameraAction?>(null) }
+    var scanMode by remember { mutableStateOf(QrScanMode.ATTENDANCE) }
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
 
@@ -54,6 +57,10 @@ fun QrScanFlow(
         if (success == true) {
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         }
+    }
+
+    LaunchedEffect(message) {
+        if (message != null) diagnostics.stage(QrStage.RESULT)
     }
 
     fun closeFlow() {
@@ -86,6 +93,7 @@ fun QrScanFlow(
     }
 
     fun openScanner() {
+        diagnostics.stage(QrStage.CAMERA_RELEASE)
         showSelfie = false
         showScanner = false
         // Route through pendingScanner so the front camera fully unbinds before the rear camera binds.
@@ -94,6 +102,9 @@ fun QrScanFlow(
 
     LaunchedEffect(visible) {
         if (visible) {
+            scanMode = QrScanMode.ATTENDANCE
+            diagnostics.start(scanMode)
+            diagnostics.stage(QrStage.SELFIE)
             qrSelfie = null
             showScanner = false
             if (hasPermission(context, Manifest.permission.CAMERA)) showSelfie = true else requestCamera(CameraAction.Selfie)
@@ -125,29 +136,47 @@ fun QrScanFlow(
                 openScanner()
             },
             onAttachImage = { attachSelfieLauncher.launch("image/*") },
+            onRecognitionOnly =
+                if (BuildConfig.DEBUG) {
+                    {
+                        scanMode = QrScanMode.RECOGNITION_ONLY
+                        diagnostics.start(scanMode)
+                        openScanner()
+                    }
+                } else {
+                    null
+                },
             onCancel = { closeFlow() },
             onError = onShowMessage,
+            diagnostics = diagnostics,
         )
     }
 
     if (pendingScanner) {
-        CameraHandoffScreen()
+        CameraHandoffScreen(diagnostics)
     }
 
     if (showScanner) {
         QrScanScreen(
-            onQrScanned = { rawQr ->
-                val selfie = qrSelfie
-                if (selfie != null && !isSubmitting) {
-                    showScanner = false
-                    qrSelfie = null
-                    onSubmit(rawQr, selfie)
-                    onDismiss()
+            onQrScanned = { rawQr, decoder ->
+                when (qrScanAction(scanMode, qrSelfie != null, isSubmitting)) {
+                    QrScanAction.RECOGNIZED_ONLY -> {
+                        onShowMessage(recognitionOnlyMessage(decoder))
+                        closeFlow()
+                    }
+                    QrScanAction.SUBMIT -> {
+                        val selfie = requireNotNull(qrSelfie)
+                        showScanner = false
+                        qrSelfie = null
+                        onSubmit(rawQr, selfie)
+                        onDismiss()
+                    }
+                    QrScanAction.IGNORE -> Unit
                 }
-                // else: a stray scan while submitting or without a selfie — ignore.
             },
             onCancel = { closeFlow() },
             onError = onShowMessage,
+            diagnostics = diagnostics,
         )
     }
 

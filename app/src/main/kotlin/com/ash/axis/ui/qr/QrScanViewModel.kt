@@ -2,17 +2,21 @@ package com.ash.axis.ui.qr
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.ash.axis.BuildConfig
 import com.ash.axis.data.DataRefreshSignal
 import com.ash.axis.data.RefreshTrigger
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
+import com.ash.axis.data.repository.IcloudServerException
 import com.ash.axis.data.session.UsageReporter
+import com.ash.axis.ui.ErrorText
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 import javax.inject.Inject
 
 data class QrScanUiState(
@@ -33,6 +37,7 @@ class QrScanViewModel
     ) : ViewModel() {
         private val _state = MutableStateFlow(QrScanUiState())
         val state: StateFlow<QrScanUiState> = _state.asStateFlow()
+        internal val diagnostics = QrDiagnostics(BuildConfig.DEBUG)
 
         fun clearMessage() {
             _state.update { it.copy(message = null, success = null) }
@@ -57,7 +62,9 @@ class QrScanViewModel
 
             viewModelScope.launch {
                 _state.update { it.copy(isSubmitting = true, message = null, success = null) }
+                val startedAt = System.nanoTime()
                 try {
+                    diagnostics.stage(QrStage.AUTHENTICATION)
                     val user = authRepository.getUserInfo() ?: error("Not logged in")
                     val result =
                         attendanceRepo.sendScanQR(
@@ -69,7 +76,9 @@ class QrScanViewModel
                             longitude = FIXED_LONGITUDE,
                             userSelfie = userSelfie,
                             clientId = user.clientId,
+                            onSubmissionStart = { diagnostics.stage(QrStage.SUBMISSION) },
                         )
+                    diagnostics.response(result.httpStatus, result.httpDurationMs ?: 0, result.success)
                     usageReporter.log(if (result.success == true) UsageReporter.QR_SCAN else UsageReporter.QR_FAIL)
                     if (result.success == true) {
                         refreshSignal.emit(RefreshTrigger.ATTENDANCE)
@@ -82,11 +91,13 @@ class QrScanViewModel
                         )
                     }
                 } catch (e: Exception) {
+                    val status = (e as? IcloudServerException)?.statusCode ?: (e as? HttpException)?.code()
+                    diagnostics.error(e, status, (System.nanoTime() - startedAt) / 1_000_000)
                     usageReporter.log(UsageReporter.QR_FAIL)
                     _state.update {
                         it.copy(
                             isSubmitting = false,
-                            message = e.message ?: "QR attendance failed",
+                            message = ErrorText.forData(e),
                             success = false,
                         )
                     }
