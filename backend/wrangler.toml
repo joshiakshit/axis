@@ -34,6 +34,7 @@ OPEN_ENROLLMENT = "false"
 #   APP_ACCESS_KEY     optional soft gate for GET /v1/config
 #   SESSION_SECRET     required: signs Axis session tokens (openssl rand -hex 32)
 #   ADMIN_ADMNOS       comma-separated owner admno(s) that get admin + auto-approval
+#   ADMIN_APP_TOKEN    personal credential for the separate Axis Admin app
 
 [observability]
 enabled = true

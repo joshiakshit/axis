@@ -55,6 +55,8 @@ export interface Env {
   SESSION_SECRET?: string;
   /** Secret: comma-separated owner admno(s) granted admin + auto-approval. */
   ADMIN_ADMNOS?: string;
+  /** Secret: personal credential for the separate Axis Admin app. */
+  ADMIN_APP_TOKEN?: string;
 }
 
 const EPOCH = new Date(0).toISOString();

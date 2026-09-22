@@ -42,6 +42,7 @@ Config is stored per tenant in KV under `config:<tenant>`; add `?tenant=gu` to t
 | GET    | `/v1/config`    | `x-axis-key` *(only if set)*      | fetch config                     |
 | PUT    | `/v1/config`    | `Authorization: Bearer <ADMIN>`   | merge a partial config and save  |
 | POST   | `/v1/session`   | iCloudEMS token in body           | register/refresh a user, get status + role |
+| POST   | `/v1/admin/device-session` | `Bearer <ADMIN_APP_TOKEN>` | create an admin session for the separate Axis Admin app |
 | POST   | `/v1/events`    | `Bearer <any Axis session>`       | bump aggregate usage counters    |
 | GET    | `/v1/admin/users` | `Bearer <Axis session, admin>`  | list governed users (with usage) |
 | POST   | `/v1/admin/users/:admno/allow` \| `/kick` \| `/ban` | `Bearer <Axis session, admin>` | approve / revoke / hard-block a user |
@@ -82,6 +83,7 @@ npx wrangler d1 migrations apply axis --remote   # applies all migrations (users
 npx wrangler secret put ADMIN_TOKEN          # long random string — required to write config
 npx wrangler secret put SESSION_SECRET       # long random string — signs Axis session tokens
 npx wrangler secret put ADMIN_ADMNOS         # your admno(s), comma-separated — the owner/admin
+npx wrangler secret put ADMIN_APP_TOKEN      # personal credential for the separate Axis Admin app
 npx wrangler secret put DEFAULT_AUTH_TOKEN   # optional: seed the iCloudEMS bearer
 npx wrangler secret put APP_ACCESS_KEY       # optional: soft-gate GET with an x-axis-key header
 

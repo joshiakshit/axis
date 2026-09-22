@@ -190,6 +190,23 @@ async function handleSession(request: Request, env: Env, url: URL): Promise<Resp
   return json({ status: user.status, role: user.role, admno: user.admno, name: user.name, sessionToken });
 }
 
+async function handleAdminDeviceSession(request: Request, env: Env): Promise<Response> {
+  if (!env.SESSION_SECRET || !env.ADMIN_APP_TOKEN) return error(503, "admin device sessions are not configured");
+  const header = request.headers.get("authorization") ?? "";
+  const credential = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+  if (!credential || !timingSafeEqual(credential, env.ADMIN_APP_TOKEN)) return error(401, "invalid device credential");
+
+  const admnos = (env.ADMIN_ADMNOS ?? "").split(",").map((admno) => admno.trim()).filter(Boolean);
+  for (const admno of admnos) {
+    const user = await getUser(env, admno);
+    if (user?.status === "approved" && user.role === "admin") {
+      const sessionToken = await signSession(user.admno, "admin", env.SESSION_SECRET, SESSION_TTL_SECONDS);
+      return json({ status: user.status, role: user.role, admno: user.admno, name: user.name, sessionToken });
+    }
+  }
+  return error(403, "no approved administrator is registered");
+}
+
 async function requireAdminSession(request: Request, env: Env): Promise<Response | null> {
   if (!env.SESSION_SECRET) return error(503, "sessions are disabled: SESSION_SECRET is not configured");
   const header = request.headers.get("authorization") ?? "";
@@ -385,6 +402,9 @@ export default {
     }
     if (url.pathname === "/v1/session" && request.method === "POST") {
       return handleSession(request, env, url);
+    }
+    if (url.pathname === "/v1/admin/device-session" && request.method === "POST") {
+      return handleAdminDeviceSession(request, env);
     }
     if (url.pathname === "/v1/events" && request.method === "POST") {
       return handleEvents(request, env);

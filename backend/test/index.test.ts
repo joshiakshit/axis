@@ -13,9 +13,58 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     DEFAULT_TENANT: "gu",
     SESSION_SECRET: SECRET,
     ADMIN_ADMNOS: "21000",
+    ADMIN_APP_TOKEN: "test-device-credential",
     ...overrides,
   } as unknown as Env;
 }
+
+describe("POST /v1/admin/device-session", () => {
+  it("rejects a missing or wrong device credential", async () => {
+    const env = makeEnv();
+    await adminSession(env);
+    for (const credential of ["", "wrong"]) {
+      const res = await worker.fetch(
+        req("/v1/admin/device-session", {
+          method: "POST",
+          headers: { authorization: `Bearer ${credential}` },
+        }),
+        env,
+      );
+      expect(res.status).toBe(401);
+    }
+  });
+
+  it("issues a working admin session for the configured owner", async () => {
+    const env = makeEnv();
+    await adminSession(env);
+    const res = await worker.fetch(
+      req("/v1/admin/device-session", {
+        method: "POST",
+        headers: { authorization: "Bearer test-device-credential" },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const session = (await res.json()) as { admno: string; role: string; sessionToken: string };
+    expect(session).toMatchObject({ admno: "21000", role: "admin" });
+    const users = await worker.fetch(
+      req("/v1/admin/users", { headers: { authorization: `Bearer ${session.sessionToken}` } }),
+      env,
+    );
+    expect(users.status).toBe(200);
+  });
+
+  it("requires the owner to be registered and approved", async () => {
+    const res = await worker.fetch(
+      req("/v1/admin/device-session", {
+        method: "POST",
+        headers: { authorization: "Bearer test-device-credential" },
+      }),
+      makeEnv(),
+    );
+    expect(res.status).toBe(403);
+  });
+});
 
 function req(path: string, init: RequestInit = {}): Request {
   return new Request(`https://axis.test${path}`, init);
