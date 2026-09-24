@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ash.axis.domain.model.CourseMarks
 import com.ash.axis.domain.model.LectureMark
+import com.ash.core.ui.components.AppCard
 import com.ash.core.ui.theme.AppDimens
 import com.ash.core.ui.theme.AppShapes
 import com.ash.core.ui.theme.cardColor
@@ -112,9 +113,8 @@ internal fun CourseMarksCard(
     course: CourseMarks,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
+    AppCard(
         modifier = modifier.fillMaxWidth(),
-        shape = AppShapes.medium,
         color = cardColor(),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f)),
     ) {

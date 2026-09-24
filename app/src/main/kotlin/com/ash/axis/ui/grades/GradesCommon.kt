@@ -3,7 +3,6 @@ package com.ash.axis.ui.grades
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,8 +31,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ash.core.ui.components.AppCard
+import com.ash.core.ui.components.AppSectionLabel
 import com.ash.core.ui.theme.AppDimens
-import com.ash.core.ui.theme.AppShapes
 import com.ash.core.ui.theme.cardColor
 import kotlinx.coroutines.delay
 
@@ -83,19 +83,7 @@ internal fun SelectionPill(
 
 @Composable
 internal fun SectionLabel(text: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(
-            text,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.6.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
+    AppSectionLabel(text, modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
 }
 
 @Composable
@@ -130,9 +118,7 @@ internal fun StatusMessage(
     text: String,
     isError: Boolean = false,
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = AppShapes.medium,
+    AppCard(
         color =
             if (isError) {
                 MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)

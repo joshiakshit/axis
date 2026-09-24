@@ -13,7 +13,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -23,9 +22,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ash.axis.domain.model.AdmitCardEntry
 import com.ash.axis.ui.BottomSpacer
+import com.ash.core.ui.components.AppCard
 import com.ash.core.ui.theme.AppDimens
-import com.ash.core.ui.theme.AppShapes
-import com.ash.core.ui.theme.cardColor
 
 @Composable
 internal fun AdmitCardContent(
@@ -51,11 +49,7 @@ internal fun AdmitCardContent(
 
 @Composable
 private fun AdmitCardEntryCard(entry: AdmitCardEntry) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = AppShapes.medium,
-        color = cardColor(),
-    ) {
+    AppCard {
         Column(modifier = Modifier.padding(AppDimens.cardPadding)) {
             if (entry.date.isNotBlank()) {
                 Text(

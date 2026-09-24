@@ -37,7 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ash.axis.domain.model.PerformanceOption
-import com.ash.core.ui.theme.AppShapes
+import com.ash.core.ui.components.AppCard
 
 @Suppress("LongMethod")
 @Composable
@@ -45,11 +45,7 @@ internal fun PerformanceFilterPanel(
     data: GradesUiState,
     viewModel: GradesViewModel,
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = AppShapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainerLowest,
-    ) {
+    AppCard(color = MaterialTheme.colorScheme.surfaceContainerLowest) {
         Column(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
