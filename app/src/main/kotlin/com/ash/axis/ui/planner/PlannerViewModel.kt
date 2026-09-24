@@ -121,6 +121,13 @@ class PlannerViewModel
             observePreferences()
             viewModelScope.launch { networkMonitor.isOnline.collect { online -> _state.update { it.copy(isOffline = !online) } } }
             viewModelScope.launch {
+                combine(coordinator.attendanceDemandError, coordinator.timetableDemandError) { attendance, timetable ->
+                    attendance ?: timetable
+                }.collect { error ->
+                    if (error != null) _state.update { it.copy(isLoading = false, error = ErrorText.forData(error)) }
+                }
+            }
+            viewModelScope.launch {
                 coordinator.activeContext.collect {
                     coverageJobs.values.forEach(Job::cancel)
                     coverageJobs.clear()
