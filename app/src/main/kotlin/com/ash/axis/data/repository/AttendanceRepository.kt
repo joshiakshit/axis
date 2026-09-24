@@ -423,8 +423,16 @@ class AttendanceRepository
 
 data class AttendanceKey(val context: StudentRequestContext, val classId: String, val year: String) {
     val cacheKey: String = "v4_attendance_${context.admno}_${context.brId}_${context.clientId}_${year}_$classId"
+
+    override fun equals(other: Any?): Boolean = other is AttendanceKey && cacheKey == other.cacheKey
+
+    override fun hashCode(): Int = cacheKey.hashCode()
 }
 
 data class DaywiseKey(val context: StudentRequestContext, val year: String, val fromDate: String, val toDate: String) {
     val cacheKey: String = "v4_daywise_${context.admno}_${context.brId}_${context.clientId}_${year}_${fromDate}_$toDate"
+
+    override fun equals(other: Any?): Boolean = other is DaywiseKey && cacheKey == other.cacheKey
+
+    override fun hashCode(): Int = cacheKey.hashCode()
 }

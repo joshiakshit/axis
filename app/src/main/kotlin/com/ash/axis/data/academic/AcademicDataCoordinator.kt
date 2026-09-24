@@ -11,6 +11,8 @@ import com.ash.axis.domain.model.StudentRequestContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -32,6 +34,8 @@ class AcademicDataCoordinator
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         private val mutex = Mutex()
         private var active: StudentRequestContext? = null
+        private val mutableActiveContext = MutableStateFlow<StudentRequestContext?>(null)
+        val activeContext: StateFlow<StudentRequestContext?> = mutableActiveContext
         private var semester: SemesterOption? = null
         private var currentWeek: Pair<String, String>? = null
         private var generation = 0L
@@ -47,6 +51,7 @@ class AcademicDataCoordinator
                 timetable.deactivateAcademicData()
                 generation++
                 active = context
+                mutableActiveContext.value = context
                 semester = selectedSemester
                 currentWeek = weekRange(weekStart)
             }
@@ -61,6 +66,7 @@ class AcademicDataCoordinator
             mutex.withLock {
                 generation++
                 active = null
+                mutableActiveContext.value = null
                 semester = null
                 currentWeek = null
                 attendance.deactivateAcademicData()
@@ -126,6 +132,7 @@ class AcademicDataCoordinator
                 val current = active ?: return
                 if (current != before || !sameAccount(current, refreshed)) return
                 active = refreshed
+                mutableActiveContext.value = refreshed
                 val week = currentWeek ?: return
                 timetable.requestWeek(TimetableKey(refreshed, week.first, week.second), force = true)
             }
@@ -171,6 +178,7 @@ class AcademicDataCoordinator
                     mutex.withLock {
                         if (generation != state.second || active != state.first || !sameAccount(state.first, resolved)) return
                         active = resolved
+                        mutableActiveContext.value = resolved
                     }
                     resolved
                 }

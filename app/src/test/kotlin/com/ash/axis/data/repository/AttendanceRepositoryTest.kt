@@ -31,6 +31,15 @@ import retrofit2.Response
 
 class AttendanceRepositoryTest {
     @Test
+    fun `attendance key ignores profile year but keeps selected year`() {
+        val first = StudentRequestContext("21001", 11, "clientMixedCase", "")
+        val resolved = first.copy(academicYear = "2026-2027")
+
+        assertEquals(AttendanceKey(first, "C1", "2025-2026"), AttendanceKey(resolved, "C1", "2025-2026"))
+        assertTrue(AttendanceKey(first, "C1", "2025-2026") != AttendanceKey(resolved, "C1", "2024-2025"))
+    }
+
+    @Test
     fun `observable summary accepts empty success with exact client id`() =
         runBlocking {
             val api = mockk<ICloudEmsApi>()
