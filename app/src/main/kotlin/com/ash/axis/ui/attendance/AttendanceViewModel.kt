@@ -2,16 +2,16 @@ package com.ash.axis.ui.attendance
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.ash.axis.data.DataRefreshSignal
-import com.ash.axis.data.RefreshTrigger
+import com.ash.axis.data.academic.AcademicDataCoordinator
+import com.ash.axis.data.academic.AcademicSnapshot
+import com.ash.axis.data.repository.AttendanceKey
 import com.ash.axis.data.repository.AttendanceRepository
-import com.ash.axis.data.repository.AuthRepository
-import com.ash.axis.data.repository.SELECTED_SEMESTER_CLASS_KEY
-import com.ash.axis.data.repository.SELECTED_SEMESTER_YEAR_KEY
+import com.ash.axis.data.repository.TimetableData
+import com.ash.axis.data.repository.TimetableKey
 import com.ash.axis.data.repository.TimetableRepository
 import com.ash.axis.domain.model.AttendanceEntry
+import com.ash.axis.domain.model.AttendanceResponse
 import com.ash.axis.domain.model.SemesterOption
-import com.ash.axis.domain.model.UserInfo
 import com.ash.axis.domain.usecase.AttendanceTone
 import com.ash.axis.domain.usecase.AttendanceUseCase
 import com.ash.axis.domain.usecase.ForecastRow
@@ -19,24 +19,22 @@ import com.ash.axis.domain.usecase.ForecastUseCase
 import com.ash.axis.domain.usecase.SubjectAttendance
 import com.ash.axis.domain.usecase.TimetableUseCase
 import com.ash.axis.ui.ErrorText
+import com.ash.axis.ui.academics.selectedSemester
 import com.ash.core.network.NetworkMonitor
 import com.ash.core.storage.PreferencesStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import javax.inject.Inject
 
@@ -44,7 +42,7 @@ data class DecoratedSubject(
     val subject: SubjectAttendance,
     val bunkable: Int,
     val need: Int,
-    val tone: com.ash.axis.domain.usecase.AttendanceTone,
+    val tone: AttendanceTone,
 )
 
 data class AttendanceUiState(
@@ -60,153 +58,155 @@ data class AttendanceUiState(
     val isRefreshing: Boolean = false,
     val threshold: Int = 75,
     val isOffline: Boolean = false,
+    val hasData: Boolean = false,
 )
 
 @HiltViewModel
-@Suppress("TooGenericExceptionCaught")
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class AttendanceViewModel
     @Inject
     constructor(
         private val attendanceRepo: AttendanceRepository,
         private val timetableRepo: TimetableRepository,
-        private val authRepository: AuthRepository,
+        private val coordinator: AcademicDataCoordinator,
         private val attendanceUseCase: AttendanceUseCase,
         private val forecastUseCase: ForecastUseCase,
         private val timetableUseCase: TimetableUseCase,
         private val preferencesStore: PreferencesStore,
-        private val networkMonitor: NetworkMonitor,
-        private val refreshSignal: DataRefreshSignal,
+        networkMonitor: NetworkMonitor,
     ) : ViewModel() {
-        private val refreshSourceId = DataRefreshSignal.newSourceId()
-
         private val _state = MutableStateFlow(AttendanceUiState())
         val state: StateFlow<AttendanceUiState> = _state.asStateFlow()
 
         init {
-            load(forceRefresh = false)
-            observeSemesterSelection()
             viewModelScope.launch {
-                refreshSignal.signal.collect { event ->
-                    if (event.sourceId != refreshSourceId &&
-                        (event.trigger == RefreshTrigger.ALL || event.trigger == RefreshTrigger.ATTENDANCE)
-                    ) {
-                        load(forceRefresh = false)
-                    }
+                coordinator.activeContext.collect {
+                    _state.value = AttendanceUiState()
                 }
             }
-        }
-
-        fun refresh() = load(forceRefresh = true)
-
-        private fun observeSemesterSelection() {
             viewModelScope.launch {
+                val semesterSnapshot =
+                    selectedSemester(coordinator, attendanceRepo, preferencesStore).flatMapLatest { semester ->
+                        val context = coordinator.activeContext.value
+                        if (context == null || semester == null) {
+                            flowOf(semester to AcademicSnapshot<AttendanceResponse>())
+                        } else {
+                            attendanceRepo.observeSummary(AttendanceKey(context, semester.classId, semester.yearId))
+                                .combine(flowOf(semester)) { snapshot, option -> option to snapshot }
+                        }
+                    }
+                val weekSnapshot =
+                    coordinator.activeContext.flatMapLatest { context ->
+                        if (context == null || context.academicYear.isBlank()) {
+                            flowOf(AcademicSnapshot<TimetableData>())
+                        } else {
+                            val (start, end) = timetableUseCase.getCurrentWeekRange()
+                            timetableRepo.observeWeek(TimetableKey(context, start.toString(), end.toString()))
+                        }
+                    }
                 combine(
-                    preferencesStore.getUserString(SELECTED_SEMESTER_YEAR_KEY),
-                    preferencesStore.getUserString(SELECTED_SEMESTER_CLASS_KEY),
-                ) { yearId, classId -> yearId to classId }
-                    .drop(1)
-                    .collect { load(forceRefresh = false) }
+                    semesterSnapshot,
+                    weekSnapshot,
+                    preferencesStore.getUserInt("attendance_threshold", 75),
+                    preferencesStore.getUserBoolean("combined_attendance"),
+                    preferencesStore.getUserString("semester_end_date", ""),
+                ) { selection, week, threshold, combined, endDate ->
+                    Presentation(selection.first, selection.second, week, threshold, combined, endDate)
+                }.collect { applyPresentation(it) }
             }
+            viewModelScope.launch {
+                coordinator.attendanceDemandError.collect { error ->
+                    if (error != null) _state.update { it.copy(isLoading = false, error = ErrorText.forData(error)) }
+                }
+            }
+            viewModelScope.launch { networkMonitor.isOnline.collect { online -> _state.update { it.copy(isOffline = !online) } } }
         }
 
-        @Suppress("LongMethod")
-        private fun load(forceRefresh: Boolean) {
+        @Suppress("TooGenericExceptionCaught")
+        fun refresh() {
             viewModelScope.launch {
-                _state.update { it.copy(isRefreshing = forceRefresh, isLoading = !forceRefresh && it.subjects.isEmpty()) }
-                try {
-                    val user = authRepository.getUserInfo() ?: error("Not logged in")
-                    val timetableContext =
-                        authRepository.requireStudentRequestContext(forceProfileRefresh = forceRefresh)
-                    val semester = selectedSemester(user, forceRefresh)
-                    val (weekStart, weekEnd) = timetableUseCase.getCurrentWeekRange()
-
-                    val (attendance, timetable) =
-                        coroutineScope {
-                            val attendanceDeferred =
-                                async {
-                                    attendanceRepo.getAttendance(
-                                        user.admno,
-                                        user.brId,
-                                        semester.classId,
-                                        semester.yearId,
-                                        forceRefresh,
-                                    )
-                                }
-                            val timetableDeferred =
-                                async {
-                                    timetableRepo.getTimetable(
-                                        timetableContext,
-                                        weekStart.toString(),
-                                        weekEnd.toString(),
-                                        forceRefresh,
-                                    )
-                                }
-                            attendanceDeferred.await() to timetableDeferred.await()
-                        }
-
-                    val threshold = preferencesStore.getUserInt("attendance_threshold", 75).first()
-                    val combinedPref = preferencesStore.getUserBoolean("combined_attendance").first()
-                    val endDateStr = preferencesStore.getUserString("semester_end_date", "").first()
-                    val endDate = endDateStr.takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-
-                    val (decorated, forecast) =
-                        withContext(Dispatchers.Default) {
-                            val rawSubjects = attendance.table.values.map { it.toSubjectAttendance() }
-                            val subjects = if (combinedPref) attendanceUseCase.combineSubjects(rawSubjects) else rawSubjects
-                            val dec =
-                                subjects.map { s ->
-                                    DecoratedSubject(
-                                        subject = s,
-                                        bunkable = attendanceUseCase.bunkBudget(s.present, s.total, threshold),
-                                        need = attendanceUseCase.mustAttend(s.present, s.total, threshold),
-                                        tone = attendanceUseCase.tone(s.percent, threshold),
-                                    )
-                                }.sortedBy { it.subject.percent }
-                            val fc = forecastUseCase.buildForecast(subjects, timetable, threshold, endDate)
-                            dec to fc
-                        }
-
-                    val overallPct = attendance.endrow.percentage
-                    val offline = networkMonitor.isOnline.first().not()
-                    _state.update {
-                        it.copy(
-                            isLoading = false,
-                            isRefreshing = false,
-                            error = null,
-                            semesterLabel = semester.label,
-                            overallPercent = overallPct,
-                            overallPresent = attendance.endrow.present,
-                            overallTotal = attendance.endrow.total,
-                            overallTone = attendanceUseCase.tone(overallPct, threshold),
-                            threshold = threshold,
-                            subjects = decorated.toImmutableList(),
-                            forecast = forecast.toImmutableList(),
-                            isOffline = offline,
-                        )
+                launch {
+                    try {
+                        coordinator.refreshAttendance()
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        _state.update { it.copy(isLoading = false, error = ErrorText.forData(error)) }
                     }
-                    if (forceRefresh) refreshSignal.emit(RefreshTrigger.ATTENDANCE, refreshSourceId)
-                } catch (e: Exception) {
-                    _state.update { it.copy(isLoading = false, isRefreshing = false, error = ErrorText.forData(e)) }
+                }
+                launch {
+                    try {
+                        coordinator.refreshTimetable()
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        _state.update { it.copy(isLoading = false, error = ErrorText.forData(error)) }
+                    }
                 }
             }
         }
 
-        private fun AttendanceEntry.toSubjectAttendance() =
-            SubjectAttendance(
-                subCode = subCode,
-                subName = subname,
-                lecType = lecType,
-                present = present,
-                total = total,
-                percent = percent,
-            )
-
-        private suspend fun selectedSemester(
-            user: UserInfo,
-            forceRefresh: Boolean,
-        ): SemesterOption {
-            val yearId = preferencesStore.getUserString(SELECTED_SEMESTER_YEAR_KEY).first()
-            val classId = preferencesStore.getUserString(SELECTED_SEMESTER_CLASS_KEY).first()
-            return attendanceRepo.getPreferredSemester(user.admno, user.brId, yearId, classId, forceRefresh)
+        private fun applyPresentation(presentation: Presentation) {
+            val semester = presentation.semester
+            val snapshot = presentation.attendance
+            val week = presentation.week
+            val threshold = presentation.threshold
+            val combined = presentation.combined
+            val endDateText = presentation.endDate
+            val data = snapshot.data
+            if (data == null) {
+                _state.update {
+                    it.copy(
+                        isLoading = snapshot.error == null,
+                        error = snapshot.error?.let(ErrorText::forData),
+                        semesterLabel = semester?.label.orEmpty(),
+                        subjects = persistentListOf(),
+                        forecast = persistentListOf(),
+                        isRefreshing = snapshot.refreshing,
+                        hasData = false,
+                    )
+                }
+                return
+            }
+            val raw = data.table.values.map { it.toSubjectAttendance() }
+            val subjects = if (combined) attendanceUseCase.combineSubjects(raw) else raw
+            val decorated =
+                subjects.map { subject ->
+                    DecoratedSubject(
+                        subject,
+                        attendanceUseCase.bunkBudget(subject.present, subject.total, threshold),
+                        attendanceUseCase.mustAttend(subject.present, subject.total, threshold),
+                        attendanceUseCase.tone(subject.percent, threshold),
+                    )
+                }.sortedBy { it.subject.percent }
+            val endDate = endDateText.takeIf(String::isNotBlank)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+            val forecast = forecastUseCase.buildForecast(subjects, week.data?.weekly.orEmpty(), threshold, endDate)
+            _state.update {
+                it.copy(
+                    isLoading = false,
+                    error = snapshot.error?.let(ErrorText::forData),
+                    semesterLabel = semester?.label.orEmpty(),
+                    overallPercent = data.endrow.percentage,
+                    overallPresent = data.endrow.present,
+                    overallTotal = data.endrow.total,
+                    overallTone = attendanceUseCase.tone(data.endrow.percentage, threshold),
+                    subjects = decorated.toImmutableList(),
+                    forecast = forecast.toImmutableList(),
+                    isRefreshing = snapshot.refreshing,
+                    threshold = threshold,
+                    hasData = true,
+                )
+            }
         }
+
+        private fun AttendanceEntry.toSubjectAttendance() = SubjectAttendance(subCode, subname, lecType, present, total, percent)
+
+        private data class Presentation(
+            val semester: SemesterOption?,
+            val attendance: AcademicSnapshot<AttendanceResponse>,
+            val week: AcademicSnapshot<TimetableData>,
+            val threshold: Int,
+            val combined: Boolean,
+            val endDate: String,
+        )
     }

@@ -6,13 +6,11 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -24,12 +22,12 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ash.axis.ui.BottomSpacer
+import com.ash.core.ui.components.AppCard
+import com.ash.core.ui.components.AppSectionLabel
 import com.ash.core.ui.components.LoadingStateContainer
 import com.ash.core.ui.components.OfflineBanner
 import com.ash.core.ui.components.PullToRefreshContainer
 import com.ash.core.ui.theme.AppDimens
-import com.ash.core.ui.theme.AppShapes
-import com.ash.core.ui.theme.cardColor
 import com.ash.core.util.Result
 
 @Composable
@@ -41,7 +39,7 @@ fun AttendanceScreen(
     val result: Result<AttendanceUiState> =
         when {
             state.isLoading -> Result.Loading
-            state.error != null && state.subjects.isEmpty() -> Result.Error(Exception(state.error), state.error)
+            state.error != null && !state.hasData -> Result.Error(Exception(state.error), state.error)
             else -> Result.Success(state)
         }
 
@@ -62,6 +60,9 @@ private fun AttendanceContent(data: AttendanceUiState) {
         if (data.isOffline) {
             item { OfflineBanner(visible = true) }
         }
+        data.error?.let { message ->
+            item(contentType = "refresh_error") { Text(message, color = MaterialTheme.colorScheme.error) }
+        }
         item { Spacer(Modifier.height(14.dp)) }
         if (data.semesterLabel.isNotBlank()) {
             item { SemesterBanner(data.semesterLabel) }
@@ -69,7 +70,7 @@ private fun AttendanceContent(data: AttendanceUiState) {
         item { OverallSummaryCard(data) }
 
         subjectGroups(data.subjects).forEach { group ->
-            item(contentType = "section_label") { SectionLabel(group.title.uppercase()) }
+            item(contentType = "section_label") { AppSectionLabel(group.title.uppercase()) }
             items(
                 group.subjects,
                 key = { "${it.subject.subCode}_${it.subject.lecType}" },
@@ -89,11 +90,7 @@ private fun AttendanceContent(data: AttendanceUiState) {
 
 @Composable
 private fun SemesterBanner(label: String) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = AppShapes.medium,
-        color = cardColor(),
-    ) {
+    AppCard {
         Row(
             modifier = Modifier.padding(14.dp),
             verticalAlignment = Alignment.CenterVertically,

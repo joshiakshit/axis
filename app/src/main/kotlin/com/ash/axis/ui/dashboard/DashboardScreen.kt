@@ -6,35 +6,39 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ash.axis.domain.usecase.AttendanceTone
 import com.ash.axis.ui.BottomSpacer
+import com.ash.core.ui.components.AppSectionLabel
 import com.ash.core.ui.components.LoadingStateContainer
 import com.ash.core.ui.components.OfflineBanner
 import com.ash.core.ui.components.PullToRefreshContainer
 import com.ash.core.ui.theme.AppDimens
 import com.ash.core.util.Result
 
+@Suppress("LongMethod", "CyclomaticComplexMethod")
 @Composable
 fun DashboardScreen(
     modifier: Modifier = Modifier,
     viewModel: DashboardViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.syncFromCache() }
+    LaunchedEffect(viewModel) { viewModel.onVisible() }
 
     val result: Result<DashboardUiState> =
         when {
-            state.isLoading -> Result.Loading
-            state.error != null && state.subjects.isEmpty() -> Result.Error(Exception(state.error), state.error)
+            state.needsFullScreenLoading() -> Result.Loading
+            state.needsFullScreenError() -> {
+                val message = state.attendanceError ?: state.timetableError ?: ""
+                Result.Error(Exception(message), message)
+            }
             else -> Result.Success(state)
         }
 
@@ -53,15 +57,23 @@ fun DashboardScreen(
                 }
                 item(contentType = "spacer") { Spacer(Modifier.height(14.dp)) }
                 item(contentType = "greeting") { GreetingHeader(data.firstName) }
+                data.attendanceError?.let { message ->
+                    item(contentType = "attendance_error") { Text("Attendance: $message") }
+                }
+                data.timetableError?.let { message ->
+                    item(contentType = "timetable_error") { Text("Schedule: $message") }
+                }
                 data.nextClass?.let { next ->
                     item(contentType = "next_class") { NextClassCard(next) }
                 }
                 if (data.subjects.isNotEmpty()) {
                     item(contentType = "stats_row") { StatsRow(data) }
+                } else if (!data.hasAttendance && data.attendanceError == null) {
+                    item(contentType = "attendance_loading") { Text("Loading attendance…") }
                 }
 
                 item(contentType = "section_label") {
-                    SectionLabel(
+                    AppSectionLabel(
                         buildString {
                             append("TODAY'S SCHEDULE")
                             if (data.todaySlots.isNotEmpty()) {
@@ -72,14 +84,16 @@ fun DashboardScreen(
                 }
                 if (data.todaySlots.isNotEmpty()) {
                     item(contentType = "timeline") { TimelineCard(data.todaySlots) }
-                } else {
+                } else if (data.hasTimetable) {
                     item(contentType = "empty_day") { NoClassesToday() }
+                } else if (data.timetableError == null) {
+                    item(contentType = "schedule_loading") { Text("Loading schedule…") }
                 }
 
                 val atRiskSubjects = data.subjects.filter { it.tone != AttendanceTone.OK }
                 if (atRiskSubjects.isNotEmpty()) {
                     item(contentType = "section_label") {
-                        SectionLabel("AT RISK · ${atRiskSubjects.size}")
+                        AppSectionLabel("AT RISK · ${atRiskSubjects.size}")
                     }
                     item(contentType = "subject_list") { SubjectSummaryList(atRiskSubjects) }
                 }

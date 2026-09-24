@@ -29,6 +29,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.ash.axis.ui.attendance.AttendanceScreen
 import com.ash.axis.ui.daywise.DaywiseScreen
 import com.ash.axis.ui.planner.PlannerScreen
@@ -40,7 +41,10 @@ private val tabs = listOf("Overall", "Day-wise", "Planner")
 @Suppress("LongMethod")
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun AcademicsScreen(modifier: Modifier = Modifier) {
+fun AcademicsScreen(
+    modifier: Modifier = Modifier,
+    viewModel: AcademicsViewModel = hiltViewModel(),
+) {
     var savedPage by rememberSaveable { mutableIntStateOf(0) }
     val pagerState = rememberPagerState(initialPage = savedPage) { tabs.size }
     val scope = rememberCoroutineScope()
@@ -51,6 +55,7 @@ fun AcademicsScreen(modifier: Modifier = Modifier) {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         }
         savedPage = pagerState.settledPage
+        viewModel.onSettledPage(pagerState.settledPage)
     }
 
     Column(modifier = modifier.fillMaxSize()) {

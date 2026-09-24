@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -28,13 +30,13 @@ fun DaywiseScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     LaunchedEffect(isVisible) {
-        if (isVisible) viewModel.onPageVisible()
+        viewModel.onPageVisibilityChanged(isVisible)
     }
 
     val result: Result<DaywiseUiState> =
         when {
             state.isLoading -> Result.Loading
-            state.error != null && state.days.isEmpty() -> Result.Error(Exception(state.error), state.error)
+            state.error != null && !state.hasData -> Result.Error(Exception(state.error), state.error)
             else -> Result.Success(state)
         }
 
@@ -46,6 +48,9 @@ fun DaywiseScreen(
         ) {
             if (data.isOffline) {
                 item { OfflineBanner(visible = true) }
+            }
+            data.error?.let { message ->
+                item(contentType = "refresh_error") { Text(message, color = MaterialTheme.colorScheme.error) }
             }
             item { Spacer(Modifier.height(14.dp)) }
             item {

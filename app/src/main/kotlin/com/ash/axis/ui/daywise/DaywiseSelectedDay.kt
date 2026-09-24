@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -24,9 +23,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ash.axis.domain.model.DaywiseSlot
-import com.ash.core.ui.theme.AppShapes
+import com.ash.core.ui.components.AppCard
 import com.ash.core.ui.theme.StatusColors
-import com.ash.core.ui.theme.cardColor
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -36,11 +34,7 @@ internal fun SelectedDayCard(data: DaywiseUiState) {
     val weekday = data.selectedDate.dayOfWeek.name.lowercase().replaceFirstChar { it.titlecase(Locale.ENGLISH) }
     val dateLabel = data.selectedDate.format(DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH))
 
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = AppShapes.medium,
-        color = cardColor(),
-    ) {
+    AppCard {
         Column(modifier = Modifier.padding(18.dp)) {
             Text(
                 weekday.uppercase(Locale.ENGLISH),

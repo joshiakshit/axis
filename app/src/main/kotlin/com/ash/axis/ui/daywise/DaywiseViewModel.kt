@@ -2,26 +2,28 @@ package com.ash.axis.ui.daywise
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.ash.axis.data.DataRefreshSignal
-import com.ash.axis.data.RefreshTrigger
+import com.ash.axis.data.academic.AcademicDataCoordinator
+import com.ash.axis.data.academic.AcademicSnapshot
 import com.ash.axis.data.repository.AttendanceRepository
-import com.ash.axis.data.repository.AuthRepository
-import com.ash.axis.data.repository.SELECTED_SEMESTER_CLASS_KEY
-import com.ash.axis.data.repository.SELECTED_SEMESTER_YEAR_KEY
+import com.ash.axis.data.repository.DaywiseKey
+import com.ash.axis.domain.model.DaywiseResponse
 import com.ash.axis.domain.model.DaywiseSlot
 import com.ash.axis.ui.ErrorText
+import com.ash.axis.ui.academics.selectedSemester
 import com.ash.core.network.NetworkMonitor
 import com.ash.core.storage.PreferencesStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -47,76 +49,109 @@ data class DaywiseUiState(
     val isRefreshing: Boolean = false,
     val lastUpdated: Long? = null,
     val isOffline: Boolean = false,
+    val hasData: Boolean = false,
 )
 
 @HiltViewModel
-@Suppress("TooGenericExceptionCaught")
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class DaywiseViewModel
     @Inject
     constructor(
         private val attendanceRepo: AttendanceRepository,
-        private val authRepository: AuthRepository,
-        private val preferencesStore: PreferencesStore,
-        private val networkMonitor: NetworkMonitor,
-        private val refreshSignal: DataRefreshSignal,
+        private val coordinator: AcademicDataCoordinator,
+        preferencesStore: PreferencesStore,
+        networkMonitor: NetworkMonitor,
     ) : ViewModel() {
-        private val refreshSourceId = DataRefreshSignal.newSourceId()
-
         private val _state = MutableStateFlow(DaywiseUiState())
         val state: StateFlow<DaywiseUiState> = _state.asStateFlow()
-
-        private val dateFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+        private val dateFmt = DateTimeFormatter.ISO_LOCAL_DATE
         private val monthFmt = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.ENGLISH)
-
-        private var autoRefreshed = false
+        private val semester = selectedSemester(coordinator, attendanceRepo, preferencesStore)
+        private val selectedSemesterState = MutableStateFlow<com.ash.axis.domain.model.SemesterOption?>(null)
+        private val visible = MutableStateFlow(false)
 
         init {
-            setMonth(LocalDate.now(), selectedDate = LocalDate.now())
-            load(forceRefresh = false)
-            observeSemesterSelection()
+            setMonth(LocalDate.now(), LocalDate.now())
             viewModelScope.launch {
-                refreshSignal.signal.collect { event ->
-                    if (event.sourceId != refreshSourceId &&
-                        (event.trigger == RefreshTrigger.ALL || event.trigger == RefreshTrigger.ATTENDANCE)
-                    ) {
-                        load(forceRefresh = false)
+                coordinator.activeContext.collect { context ->
+                    _state.update {
+                        DaywiseUiState(
+                            monthStart = it.monthStart,
+                            monthEnd = it.monthEnd,
+                            monthLabel = it.monthLabel,
+                            selectedDate = it.selectedDate,
+                        )
                     }
+                    if (context != null && visible.value) demand()
                 }
             }
-        }
-
-        fun refresh() = load(forceRefresh = true)
-
-        fun onPageVisible() {
-            if (autoRefreshed) return
-            autoRefreshed = true
             viewModelScope.launch {
-                if (networkMonitor.isOnline.first()) {
-                    load(forceRefresh = true)
+                semester.collect {
+                    selectedSemesterState.value = it
+                    if (visible.value) demand()
                 }
             }
+            viewModelScope.launch {
+                combine(coordinator.activeContext, selectedSemesterState, _state) { context, option, screen ->
+                    if (context == null || option == null) {
+                        null
+                    } else {
+                        DaywiseKey(context, option.yearId, screen.monthStart.format(dateFmt), screen.monthEnd.format(dateFmt))
+                    }
+                }.distinctUntilChanged().flatMapLatest { key ->
+                    if (key == null) {
+                        flowOf(AcademicSnapshot<DaywiseResponse>())
+                    } else {
+                        attendanceRepo.observeDaywise(key)
+                    }
+                }.collect { applySnapshot(it) }
+            }
+            viewModelScope.launch {
+                coordinator.daywiseDemandError.collect { error ->
+                    if (error != null) _state.update { it.copy(isLoading = false, error = ErrorText.forData(error)) }
+                }
+            }
+            viewModelScope.launch { networkMonitor.isOnline.collect { online -> _state.update { it.copy(isOffline = !online) } } }
         }
 
-        private fun observeSemesterSelection() {
+        fun onPageVisibilityChanged(isVisible: Boolean) {
+            visible.value = isVisible
+            if (isVisible) demand()
+        }
+
+        @Suppress("TooGenericExceptionCaught")
+        fun refresh() {
+            val option = selectedSemesterState.value ?: return
+            val screen = _state.value
             viewModelScope.launch {
-                combine(
-                    preferencesStore.getUserString(SELECTED_SEMESTER_YEAR_KEY),
-                    preferencesStore.getUserString(SELECTED_SEMESTER_CLASS_KEY),
-                ) { yearId, classId -> yearId to classId }
-                    .drop(1)
-                    .collect { load(forceRefresh = false) }
+                try {
+                    coordinator.refreshDaywise(option.yearId, screen.monthStart.format(dateFmt), screen.monthEnd.format(dateFmt))
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    _state.update { it.copy(isLoading = false, isRefreshing = false, error = ErrorText.forData(error)) }
+                }
             }
         }
 
         fun shiftMonth(delta: Int) {
             val target = _state.value.monthStart.plusMonths(delta.toLong())
             val selected = target.withDayOfMonth(target.lengthOfMonth().coerceAtMost(_state.value.selectedDate.dayOfMonth))
-            setMonth(target, selectedDate = selected)
-            load(forceRefresh = false)
+            setMonth(target, selected)
+            demand()
         }
 
         fun selectDate(date: LocalDate) {
             _state.update { it.copy(selectedDate = date) }
+        }
+
+        private fun demand() {
+            val option = selectedSemesterState.value ?: return
+            if (!visible.value || coordinator.activeContext.value == null) return
+            val screen = _state.value
+            viewModelScope.launch {
+                coordinator.daywiseVisible(option.yearId, screen.monthStart.format(dateFmt), screen.monthEnd.format(dateFmt))
+            }
         }
 
         private fun setMonth(
@@ -131,78 +166,51 @@ class DaywiseViewModel
                     monthEnd = end,
                     monthLabel = start.format(monthFmt),
                     selectedDate = selectedDate.coerceIn(start, end),
+                    days = persistentListOf(),
+                    hasData = false,
+                    isLoading = true,
+                    error = null,
                 )
             }
         }
 
-        @Suppress("LongMethod")
-        private fun load(forceRefresh: Boolean) {
-            viewModelScope.launch {
+        private fun applySnapshot(snapshot: AcademicSnapshot<DaywiseResponse>) {
+            val response = snapshot.data
+            if (response == null) {
                 _state.update {
                     it.copy(
-                        isRefreshing = forceRefresh && it.days.isNotEmpty(),
-                        isLoading = it.days.isEmpty(),
+                        days = persistentListOf(),
+                        hasData = false,
+                        isLoading = snapshot.error == null,
+                        isRefreshing = snapshot.refreshing,
+                        error = snapshot.error?.let(ErrorText::forData),
+                        lastUpdated = null,
                     )
                 }
-                try {
-                    val user = authRepository.getUserInfo() ?: error("Not logged in")
-                    val yearId = preferencesStore.getUserString(SELECTED_SEMESTER_YEAR_KEY).first()
-                    val classId = preferencesStore.getUserString(SELECTED_SEMESTER_CLASS_KEY).first()
-                    val semester = attendanceRepo.getPreferredSemester(user.admno, user.brId, yearId, classId, forceRefresh)
-
-                    val start = _state.value.monthStart
-                    val end = _state.value.monthEnd
-
-                    val response =
-                        attendanceRepo.getDaywiseAttendance(
-                            user.admno,
-                            user.brId,
-                            semester.yearId,
-                            start.format(dateFmt),
-                            end.format(dateFmt),
-                            forceRefresh,
-                        )
-
-                    val days =
-                        response.dateArray.entries
-                            .mapNotNull { (key, dateStr) ->
-                                val date =
-                                    try {
-                                        LocalDate.parse(dateStr, dateFmt)
-                                    } catch (_: Exception) {
-                                        null
-                                    } ?: return@mapNotNull null
-
-                                val slots =
-                                    (response.attendanceArray[key]?.values?.toList() ?: emptyList())
-                                        .filter { it.isPresent != null }
-                                        .sortedBy { it.fromTime }
-                                DaywiseDay(
-                                    date = date,
-                                    label =
-                                        "${date.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.ENGLISH)}, " +
-                                            date.format(DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH)),
-                                    slots = slots.toImmutableList(),
-                                )
-                            }
-                            .sortedBy { it.date }
-                            .toImmutableList()
-
-                    val offline = networkMonitor.isOnline.first().not()
-                    _state.update {
-                        it.copy(
-                            isLoading = false,
-                            isRefreshing = false,
-                            error = null,
-                            days = days,
-                            lastUpdated = if (forceRefresh) System.currentTimeMillis() else it.lastUpdated,
-                            isOffline = offline,
-                        )
-                    }
-                    if (forceRefresh) refreshSignal.emit(RefreshTrigger.ATTENDANCE, refreshSourceId)
-                } catch (e: Exception) {
-                    _state.update { it.copy(isLoading = false, isRefreshing = false, error = ErrorText.forData(e)) }
-                }
+                return
+            }
+            val days =
+                response.dateArray.entries.mapNotNull { (key, text) ->
+                    val date = runCatching { LocalDate.parse(text, dateFmt) }.getOrNull() ?: return@mapNotNull null
+                    val slots =
+                        response.attendanceArray[key]?.values.orEmpty()
+                            .filter { it.isPresent != null }.sortedBy { it.fromTime }
+                    DaywiseDay(
+                        date,
+                        "${date.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.ENGLISH)}, " +
+                            date.format(DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH)),
+                        slots.toImmutableList(),
+                    )
+                }.sortedBy { it.date }.toImmutableList()
+            _state.update {
+                it.copy(
+                    isLoading = false,
+                    isRefreshing = snapshot.refreshing,
+                    error = snapshot.error?.let(ErrorText::forData),
+                    days = days,
+                    lastUpdated = snapshot.updatedAtMillis,
+                    hasData = true,
+                )
             }
         }
     }

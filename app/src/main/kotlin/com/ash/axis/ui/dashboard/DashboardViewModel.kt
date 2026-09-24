@@ -2,40 +2,41 @@ package com.ash.axis.ui.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.ash.axis.data.DataRefreshSignal
-import com.ash.axis.data.RefreshTrigger
+import com.ash.axis.data.academic.AcademicDataCoordinator
+import com.ash.axis.data.academic.AcademicSnapshot
+import com.ash.axis.data.repository.AttendanceKey
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
-import com.ash.axis.data.repository.SELECTED_SEMESTER_CLASS_KEY
-import com.ash.axis.data.repository.SELECTED_SEMESTER_YEAR_KEY
+import com.ash.axis.data.repository.TimetableData
+import com.ash.axis.data.repository.TimetableKey
 import com.ash.axis.data.repository.TimetableRepository
 import com.ash.axis.domain.model.AttendanceEntry
-import com.ash.axis.domain.model.SemesterOption
+import com.ash.axis.domain.model.AttendanceResponse
 import com.ash.axis.domain.model.TimetableSlot
-import com.ash.axis.domain.model.UserInfo
 import com.ash.axis.domain.usecase.AttendanceTone
 import com.ash.axis.domain.usecase.AttendanceUseCase
+import com.ash.axis.domain.usecase.SubjectAttendance
 import com.ash.axis.domain.usecase.TimetableUseCase
 import com.ash.axis.ui.ErrorText
+import com.ash.axis.ui.academics.selectedSemester
 import com.ash.core.network.NetworkMonitor
 import com.ash.core.storage.PreferencesStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import java.time.LocalDate
+import java.time.format.TextStyle
+import java.util.Locale
 import javax.inject.Inject
 
 data class DashboardSubject(
@@ -65,8 +66,6 @@ data class NextClassInfo(
 )
 
 data class DashboardUiState(
-    val isLoading: Boolean = true,
-    val error: String? = null,
     val firstName: String = "",
     val overallPercent: Double = 0.0,
     val overallPresent: Int = 0,
@@ -78,204 +77,196 @@ data class DashboardUiState(
     val subjects: ImmutableList<DashboardSubject> = persistentListOf(),
     val todaySlots: ImmutableList<TodaySlotDisplay> = persistentListOf(),
     val nextClass: NextClassInfo? = null,
-    val isRefreshing: Boolean = false,
+    val hasAttendance: Boolean = false,
+    val hasTimetable: Boolean = false,
+    val attendanceError: String? = null,
+    val timetableError: String? = null,
+    val attendanceRefreshing: Boolean = false,
+    val timetableRefreshing: Boolean = false,
     val isOffline: Boolean = false,
-)
+) {
+    val isRefreshing get() = attendanceRefreshing || timetableRefreshing
+
+    fun needsFullScreenLoading() = !hasAttendance && !hasTimetable && attendanceError == null && timetableError == null
+
+    fun needsFullScreenError() = !hasAttendance && !hasTimetable && (attendanceError != null || timetableError != null)
+}
 
 @HiltViewModel
-@Suppress("TooGenericExceptionCaught")
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class DashboardViewModel
     @Inject
     constructor(
         private val attendanceRepo: AttendanceRepository,
         private val timetableRepo: TimetableRepository,
-        private val authRepository: AuthRepository,
+        private val coordinator: AcademicDataCoordinator,
+        authRepository: AuthRepository,
         private val attendanceUseCase: AttendanceUseCase,
         private val timetableUseCase: TimetableUseCase,
-        private val preferencesStore: PreferencesStore,
-        private val networkMonitor: NetworkMonitor,
-        private val refreshSignal: DataRefreshSignal,
+        preferencesStore: PreferencesStore,
+        networkMonitor: NetworkMonitor,
     ) : ViewModel() {
-        private val refreshSourceId = DataRefreshSignal.newSourceId()
-
         private val _state = MutableStateFlow(DashboardUiState())
         val state: StateFlow<DashboardUiState> = _state.asStateFlow()
 
-        private var loadJob: Job? = null
-
         init {
-            loadDashboard(forceRefresh = false)
-            observeSemesterSelection()
             viewModelScope.launch {
-                refreshSignal.signal.collect { event ->
-                    if (event.sourceId != refreshSourceId &&
-                        (event.trigger == RefreshTrigger.ALL || event.trigger == RefreshTrigger.ATTENDANCE)
-                    ) {
-                        loadDashboard(forceRefresh = false)
+                coordinator.activeContext.collect {
+                    _state.value = DashboardUiState(firstName = authRepository.getUserInfo()?.name?.substringBefore(' ').orEmpty())
+                }
+            }
+            viewModelScope.launch {
+                selectedSemester(coordinator, attendanceRepo, preferencesStore).flatMapLatest { semester ->
+                    val context = coordinator.activeContext.value
+                    if (context == null || semester == null) {
+                        flowOf(AcademicSnapshot<AttendanceResponse>())
+                    } else {
+                        attendanceRepo.observeSummary(AttendanceKey(context, semester.classId, semester.yearId))
+                    }
+                }.combine(preferencesStore.getUserInt("attendance_threshold", 75)) { snapshot, threshold ->
+                    snapshot to threshold
+                }.collect { (snapshot, threshold) -> applyAttendance(snapshot, threshold) }
+            }
+            viewModelScope.launch {
+                coordinator.activeContext.flatMapLatest { context ->
+                    if (context == null || context.academicYear.isBlank()) {
+                        flowOf(null)
+                    } else {
+                        val (start, end) = timetableUseCase.getCurrentWeekRange()
+                        timetableRepo.observeWeek(TimetableKey(context, start.toString(), end.toString()))
+                    }
+                }.collect { applyTimetable(it) }
+            }
+            viewModelScope.launch {
+                combine(coordinator.attendanceDemandError, coordinator.timetableDemandError) { attendance, timetable ->
+                    attendance to timetable
+                }.collect { (attendance, timetable) ->
+                    _state.update {
+                        it.copy(
+                            attendanceError = attendance?.let(ErrorText::forData) ?: it.attendanceError,
+                            timetableError = timetable?.let(ErrorText::forData) ?: it.timetableError,
+                        )
                     }
                 }
             }
+            viewModelScope.launch { networkMonitor.isOnline.collect { online -> _state.update { it.copy(isOffline = !online) } } }
         }
 
+        @Suppress("TooGenericExceptionCaught")
         fun refresh() {
-            loadDashboard(forceRefresh = true)
-        }
-
-        // Reload shared caches after changes on other screens.
-        fun syncFromCache() {
-            loadDashboard(forceRefresh = false)
-        }
-
-        private fun observeSemesterSelection() {
             viewModelScope.launch {
-                combine(
-                    preferencesStore.getUserString(SELECTED_SEMESTER_YEAR_KEY),
-                    preferencesStore.getUserString(SELECTED_SEMESTER_CLASS_KEY),
-                ) { yearId, classId -> yearId to classId }
-                    .drop(1)
-                    .collect { loadDashboard(forceRefresh = false) }
+                launch {
+                    try {
+                        coordinator.refreshAttendance()
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        _state.update { it.copy(attendanceError = ErrorText.forData(error)) }
+                    }
+                }
+                launch {
+                    try {
+                        coordinator.refreshTimetable()
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        _state.update { it.copy(timetableError = ErrorText.forData(error)) }
+                    }
+                }
             }
         }
 
-        @Suppress("LongMethod")
-        private fun loadDashboard(forceRefresh: Boolean) {
-            // Coalesce background loads; always allow a manual refresh.
-            if (!forceRefresh && loadJob?.isActive == true) return
-            loadJob =
-                viewModelScope.launch {
-                    _state.update { it.copy(isRefreshing = forceRefresh, isLoading = !forceRefresh && it.subjects.isEmpty()) }
+        fun onVisible() {
+            viewModelScope.launch { coordinator.homeVisible() }
+        }
 
-                    try {
-                        val threshold = preferencesStore.getUserInt("attendance_threshold", 75).first()
-                        val user = authRepository.getUserInfo() ?: error("Not logged in")
-                        val timetableContext =
-                            authRepository.requireStudentRequestContext(forceProfileRefresh = forceRefresh)
-                        val firstName = user.name.split(" ").firstOrNull() ?: "there"
-                        val semester = selectedSemester(user, forceRefresh)
-                        val (weekStart, weekEnd) = timetableUseCase.getCurrentWeekRange()
-
-                        val (attendance, timetable) =
-                            coroutineScope {
-                                val attendanceDeferred =
-                                    async {
-                                        attendanceRepo.getAttendance(
-                                            user.admno,
-                                            user.brId,
-                                            semester.classId,
-                                            semester.yearId,
-                                            forceRefresh,
-                                        )
-                                    }
-                                val timetableDeferred =
-                                    async {
-                                        runCatching {
-                                            timetableRepo.getTimetable(
-                                                timetableContext,
-                                                weekStart.toString(),
-                                                weekEnd.toString(),
-                                                forceRefresh,
-                                            )
-                                        }.getOrDefault(emptyMap())
-                                    }
-                                attendanceDeferred.await() to timetableDeferred.await()
-                            }
-
-                        val computed =
-                            withContext(Dispatchers.Default) {
-                                val rawSubjects = attendance.table.values.map { it.toSubjectAttendance() }
-                                val dashSubjects = rawSubjects.map { it.toDashboardSubject(threshold) }
-
-                                val todayKey =
-                                    java.time.LocalDate.now().dayOfWeek.getDisplayName(
-                                        java.time.format.TextStyle.SHORT,
-                                        java.util.Locale.ENGLISH,
-                                    )
-                                val todaySlots =
-                                    timetableUseCase.sortSlotsByTime(timetable[todayKey] ?: emptyList())
-                                        .map { slot ->
-                                            TodaySlotDisplay(
-                                                slot = slot,
-                                                cleanName = timetableUseCase.displaySubjectName(slot),
-                                                subjectCode =
-                                                    (
-                                                        slot.subCode.takeIf { it.isNotBlank() }
-                                                            ?: slot.sub_shortname ?: slot.sub_short
-                                                            ?: slot.subjectId
-                                                    ).uppercase(),
-                                                room = slot.roomno,
-                                                lectType = slot.lectType.ifBlank { "Class" },
-                                            )
-                                        }
-
-                                val nowMinutes = java.time.LocalTime.now().let { it.hour * 60 + it.minute }
-                                val nextClass =
-                                    todaySlots
-                                        .firstOrNull { timetableUseCase.timeToMinutes(it.slot.fromTime) > nowMinutes }
-                                        ?.let {
-                                            NextClassInfo(
-                                                cleanName = it.cleanName,
-                                                subjectCode = it.subjectCode,
-                                                room = it.room,
-                                                lectType = it.lectType,
-                                                startMinutes = timetableUseCase.timeToMinutes(it.slot.fromTime),
-                                            )
-                                        }
-
-                                val overallPct = attendance.endrow.percentage
-                                DashboardUiState(
-                                    isLoading = false,
-                                    isRefreshing = false,
-                                    error = null,
-                                    firstName = firstName,
-                                    overallPercent = overallPct,
-                                    overallPresent = attendance.endrow.present,
-                                    overallTotal = attendance.endrow.total,
-                                    overallTone = attendanceUseCase.tone(overallPct, threshold),
-                                    threshold = threshold,
-                                    atRiskCount = attendanceUseCase.atRiskCount(rawSubjects, threshold),
-                                    totalBunkable = attendanceUseCase.totalBunkable(rawSubjects, threshold),
-                                    subjects = dashSubjects.toImmutableList(),
-                                    todaySlots = todaySlots.toImmutableList(),
-                                    nextClass = nextClass,
-                                )
-                            }
-
-                        val offline = networkMonitor.isOnline.first().not()
-                        _state.update { computed.copy(isOffline = offline) }
-                        if (forceRefresh) refreshSignal.emit(RefreshTrigger.ALL, refreshSourceId)
-                    } catch (e: Exception) {
-                        _state.update { it.copy(isLoading = false, isRefreshing = false, error = ErrorText.forData(e)) }
-                    }
+        private fun applyAttendance(
+            snapshot: AcademicSnapshot<AttendanceResponse>,
+            threshold: Int,
+        ) {
+            val data = snapshot.data
+            if (data == null) {
+                _state.update {
+                    it.copy(
+                        hasAttendance = false,
+                        subjects = persistentListOf(),
+                        attendanceError = snapshot.error?.let(ErrorText::forData),
+                        threshold = threshold,
+                        attendanceRefreshing = snapshot.refreshing,
+                    )
                 }
+                return
+            }
+            val raw = data.table.values.map { it.toSubjectAttendance() }
+            val subjects =
+                raw.map { subject ->
+                    DashboardSubject(
+                        subject.subCode,
+                        subject.subName,
+                        subject.lecType,
+                        subject.present,
+                        subject.total,
+                        subject.percent,
+                        attendanceUseCase.tone(subject.percent, threshold),
+                    )
+                }
+            _state.update {
+                it.copy(
+                    hasAttendance = true,
+                    overallPercent = data.endrow.percentage,
+                    overallPresent = data.endrow.present,
+                    overallTotal = data.endrow.total,
+                    overallTone = attendanceUseCase.tone(data.endrow.percentage, threshold),
+                    threshold = threshold,
+                    atRiskCount = attendanceUseCase.atRiskCount(raw, threshold),
+                    totalBunkable = attendanceUseCase.totalBunkable(raw, threshold),
+                    subjects = subjects.toImmutableList(),
+                    attendanceError = snapshot.error?.let(ErrorText::forData),
+                    attendanceRefreshing = snapshot.refreshing,
+                )
+            }
         }
 
-        private fun AttendanceEntry.toSubjectAttendance() =
-            com.ash.axis.domain.usecase.SubjectAttendance(
-                subCode = subCode,
-                subName = subname,
-                lecType = lecType,
-                present = present,
-                total = total,
-                percent = percent,
-            )
-
-        private fun com.ash.axis.domain.usecase.SubjectAttendance.toDashboardSubject(threshold: Int) =
-            DashboardSubject(
-                subCode = subCode,
-                subName = subName,
-                lecType = lecType,
-                present = present,
-                total = total,
-                percent = percent,
-                tone = attendanceUseCase.tone(percent, threshold),
-            )
-
-        private suspend fun selectedSemester(
-            user: UserInfo,
-            forceRefresh: Boolean,
-        ): SemesterOption {
-            val yearId = preferencesStore.getUserString(SELECTED_SEMESTER_YEAR_KEY).first()
-            val classId = preferencesStore.getUserString(SELECTED_SEMESTER_CLASS_KEY).first()
-            return attendanceRepo.getPreferredSemester(user.admno, user.brId, yearId, classId, forceRefresh)
+        private fun applyTimetable(snapshot: AcademicSnapshot<TimetableData>?) {
+            val data = snapshot?.data
+            if (data == null) {
+                _state.update {
+                    it.copy(
+                        hasTimetable = false,
+                        todaySlots = persistentListOf(),
+                        nextClass = null,
+                        timetableError = snapshot?.error?.let(ErrorText::forData),
+                        timetableRefreshing = snapshot?.refreshing == true,
+                    )
+                }
+                return
+            }
+            val today = LocalDate.now().dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ENGLISH)
+            val slots =
+                timetableUseCase.sortSlotsByTime(data.weekly[today].orEmpty()).map { slot ->
+                    TodaySlotDisplay(
+                        slot,
+                        timetableUseCase.displaySubjectName(slot),
+                        (slot.subCode.takeIf(String::isNotBlank) ?: slot.sub_shortname ?: slot.sub_short ?: slot.subjectId).uppercase(),
+                        slot.roomno,
+                        slot.lectType.ifBlank { "Class" },
+                    )
+                }
+            val now = java.time.LocalTime.now().let { it.hour * 60 + it.minute }
+            val next =
+                slots.firstOrNull { timetableUseCase.timeToMinutes(it.slot.fromTime) > now }?.let {
+                    NextClassInfo(it.cleanName, it.subjectCode, it.room, it.lectType, timetableUseCase.timeToMinutes(it.slot.fromTime))
+                }
+            _state.update {
+                it.copy(
+                    hasTimetable = true,
+                    todaySlots = slots.toImmutableList(),
+                    nextClass = next,
+                    timetableError = snapshot.error?.let(ErrorText::forData),
+                    timetableRefreshing = snapshot.refreshing,
+                )
+            }
         }
+
+        private fun AttendanceEntry.toSubjectAttendance() = SubjectAttendance(subCode, subname, lecType, present, total, percent)
     }

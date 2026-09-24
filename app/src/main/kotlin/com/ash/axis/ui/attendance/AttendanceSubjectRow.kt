@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -28,11 +27,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ash.axis.domain.usecase.AttendanceTone
+import com.ash.core.ui.components.AppCard
 import com.ash.core.ui.components.StatusBadge
 import com.ash.core.ui.theme.AppDimens
 import com.ash.core.ui.theme.AppShapes
 import com.ash.core.ui.theme.SubjectColors
-import com.ash.core.ui.theme.cardColor
 import java.util.Locale
 
 @Composable
@@ -44,11 +43,7 @@ internal fun SubjectRow(
     val toneColor = decorated.tone.subjectToneColor()
     val progress = decorated.subject.progressFraction()
 
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = AppShapes.medium,
-        color = cardColor(),
-    ) {
+    AppCard(modifier = modifier) {
         Column(modifier = Modifier.padding(AppDimens.cardPadding)) {
             SubjectRowHeader(decorated, toneColor)
             Spacer(Modifier.height(8.dp))
