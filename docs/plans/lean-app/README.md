@@ -1,6 +1,6 @@
 # Lean app refactor: orchestration plan
 
-Status: wave 1 baseline verified. See [the baseline report](reports/00-baseline.md). Use the supplied isolated checkout and exact launch commit before starting an assignment.
+Status: UI foundation integrated locally. Data foundation needs a correction pass before wave 2. See [the master review](reports/01-master-review.md) and [the baseline report](reports/00-baseline.md). Use the supplied isolated checkout and exact launch commit before starting an assignment.
 
 Use GPT-6 Sol at medium reasoning for the seven assignments below. The master planner owns sequencing, shared contracts, integration decisions, and acceptance. Implementation agents do not delegate further.
 
