@@ -3,6 +3,7 @@ package com.ash.axis.data.repository
 import com.ash.axis.data.api.ICloudEmsApi
 import com.ash.axis.data.api.QrAttendanceApi
 import com.ash.axis.data.db.CacheDao
+import com.ash.axis.data.db.CacheEntity
 import com.ash.axis.domain.model.StudentRequestContext
 import com.ash.axis.domain.model.UserInfo
 import com.ash.axis.ui.qr.QrDiagnostics
@@ -30,6 +31,23 @@ import org.junit.jupiter.api.Test
 import retrofit2.Response
 
 class AttendanceRepositoryTest {
+    @Test
+    fun `legacy summary load keeps saved data after network failure`() =
+        runTest {
+            val api = mockk<ICloudEmsApi>()
+            val cacheDao = mockk<CacheDao>()
+            val authRepository = mockk<AuthRepository>()
+            coEvery { cacheDao.get(any()) } returns CacheEntity("saved", """{"table":{},"endrow":{}}""", 123L)
+            coEvery { authRepository.refreshTokenIfNeeded() } returns "token"
+            coEvery { api.postAttendance(any()) } throws IllegalStateException("offline")
+            val repository = AttendanceRepository(api, mockk<QrAttendanceApi>(), cacheDao, authRepository, Json)
+
+            val result = repository.getAttendance("21001", 11, "C1", "2025-2026", forceRefresh = true)
+
+            assertEquals(emptyMap<String, Any>(), result.table)
+            coVerify(exactly = 0) { cacheDao.put(any()) }
+        }
+
     @Test
     fun `attendance key ignores profile year but keeps selected year`() {
         val first = StudentRequestContext("21001", 11, "clientMixedCase", "")
