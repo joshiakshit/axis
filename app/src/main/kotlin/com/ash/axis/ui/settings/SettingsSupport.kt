@@ -4,12 +4,11 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.ash.axis.BuildConfig
+import com.ash.core.ui.components.SubtleDivider
 
 @Composable
 internal fun SupportAboutSettings(context: Context) {
@@ -20,17 +19,11 @@ internal fun SupportAboutSettings(context: Context) {
         ) {
             openReviewEmail(context)
         }
-        HorizontalDivider(
-            modifier = Modifier.padding(vertical = 6.dp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f),
-        )
+        SubtleDivider(modifier = Modifier.padding(vertical = 6.dp))
         ActionRow("GitHub", "github.com/joshiakshit") {
             openGithubProfile(context)
         }
-        HorizontalDivider(
-            modifier = Modifier.padding(vertical = 6.dp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f),
-        )
+        SubtleDivider(modifier = Modifier.padding(vertical = 6.dp))
         ActionRow(
             "About Axis",
             "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",

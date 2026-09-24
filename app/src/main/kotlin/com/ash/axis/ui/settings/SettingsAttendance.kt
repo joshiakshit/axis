@@ -12,7 +12,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -32,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ash.axis.domain.model.SemesterOption
+import com.ash.core.ui.components.SubtleDivider
 import com.ash.core.ui.theme.AppShapes
 import com.ash.core.ui.theme.cardColor
 
@@ -80,10 +80,7 @@ internal fun AttendanceSettings(
             }
         }
 
-        HorizontalDivider(
-            modifier = Modifier.padding(vertical = 12.dp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f),
-        )
+        SubtleDivider(modifier = Modifier.padding(vertical = 12.dp))
 
         SemesterPickerRow(
             selectedSemester = selectedSemester,
@@ -92,17 +89,11 @@ internal fun AttendanceSettings(
             onSemesterChange = onSemesterChange,
         )
 
-        HorizontalDivider(
-            modifier = Modifier.padding(vertical = 12.dp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f),
-        )
+        SubtleDivider(modifier = Modifier.padding(vertical = 12.dp))
 
         SemesterEndDateRow(semesterEndDate, onSemesterEndDateChange)
 
-        HorizontalDivider(
-            modifier = Modifier.padding(vertical = 12.dp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f),
-        )
+        SubtleDivider(modifier = Modifier.padding(vertical = 12.dp))
 
         Row(
             modifier = Modifier.fillMaxWidth(),

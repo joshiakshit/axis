@@ -22,6 +22,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ash.core.ui.components.AppCard
+import com.ash.core.ui.components.AppSectionLabel
 import com.ash.core.ui.theme.AppShapes
 
 @Composable
@@ -46,9 +48,7 @@ internal fun ProfileHeader(
     name: String,
     admno: String,
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = AppShapes.medium,
+    AppCard(
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.10f)),
     ) {
@@ -91,21 +91,15 @@ internal fun ProfileHeader(
 
 @Composable
 internal fun SectionLabel(text: String) {
-    Text(
-        text,
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = 0.6.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    AppSectionLabel(
+        text = text,
         modifier = Modifier.padding(top = 12.dp, bottom = 2.dp, start = 2.dp),
     )
 }
 
 @Composable
 internal fun SettingsCard(content: @Composable () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = AppShapes.medium,
+    AppCard(
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.10f)),
     ) {
