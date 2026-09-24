@@ -1,34 +1,31 @@
 package com.ash.axis.data.repository
 
 import com.ash.axis.data.db.CacheDao
-import com.ash.axis.data.db.CacheEntity
-import com.ash.core.storage.CacheFreshness
+import com.ash.axis.data.db.JsonCache
 import com.ash.core.storage.CachePolicy
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 
 internal class AttendanceCacheStore(
-    private val cacheDao: CacheDao,
-    private val json: Json,
+    cacheDao: CacheDao,
+    json: Json,
 ) {
+    private val cache = JsonCache(cacheDao, json)
+    private val dao = cacheDao
+
     suspend fun <T> cached(
         key: String,
         policy: CachePolicy,
         serializer: KSerializer<T>,
     ): T? {
-        val entry = cacheDao.get(key) ?: return null
-        return when (policy.evaluate(entry.cachedAt)) {
-            CacheFreshness.FRESH, CacheFreshness.STALE -> json.decodeFromString(serializer, entry.data)
-            CacheFreshness.EXPIRED -> null
-        }
+        return cache.readAccepted(key, serializer, policy)?.data
     }
 
     suspend fun <T> cachedAnyAge(
         key: String,
         serializer: KSerializer<T>,
     ): T? {
-        val entry = cacheDao.get(key) ?: return null
-        return runCatching { json.decodeFromString(serializer, entry.data) }.getOrNull()
+        return cache.read(key, serializer, CachePolicy.ATTENDANCE)?.data
     }
 
     suspend fun <T> store(
@@ -36,10 +33,10 @@ internal class AttendanceCacheStore(
         data: T,
         serializer: KSerializer<T>,
     ) {
-        cacheDao.put(CacheEntity(key = key, data = json.encodeToString(serializer, data)))
+        cache.write(key, data, serializer)
     }
 
     suspend fun clear() {
-        cacheDao.clearAll()
+        dao.clearAll()
     }
 }
