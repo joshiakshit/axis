@@ -92,6 +92,7 @@ internal fun SimulatorGrid(
     holidayMode: Boolean,
     anchorDate: LocalDate?,
     dateTimetable: ImmutableMap<LocalDate, ImmutableList<TimetableSlot>>,
+    coveredDates: ImmutableSet<LocalDate>,
     semesterEndDate: LocalDate?,
     interactionEnabled: Boolean,
     onPreview: (LocalDate) -> Unit,
@@ -171,6 +172,7 @@ internal fun SimulatorGrid(
                                 markerTypes = markersByDate[date].orEmpty(),
                                 anchorDate = anchorDate,
                                 dateTimetable = dateTimetable,
+                                coveredDates = coveredDates,
                                 semesterEndDate = semesterEndDate,
                                 interactionEnabled = interactionEnabled,
                                 onPreview = onPreview,
@@ -256,6 +258,7 @@ private fun SimulatorDayCell(
     markerTypes: Set<StudentMarkerType>,
     anchorDate: LocalDate?,
     dateTimetable: ImmutableMap<LocalDate, ImmutableList<TimetableSlot>>,
+    coveredDates: ImmutableSet<LocalDate>,
     semesterEndDate: LocalDate?,
     interactionEnabled: Boolean,
     onPreview: (LocalDate) -> Unit,
@@ -308,7 +311,13 @@ private fun SimulatorDayCell(
                 append(", preview selected")
             }
             markerTypes.forEach { append(", ${it.label.lowercase()}") }
-            if (hasClasses) append(", has classes") else append(", no classes")
+            if (hasClasses) {
+                append(", has classes")
+            } else if (date in coveredDates) {
+                append(", no classes")
+            } else {
+                append(", schedule not loaded")
+            }
             if (canInteract) append(", tap to mark, long press to preview")
         }
     }

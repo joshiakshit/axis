@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -16,7 +15,6 @@ import androidx.compose.material.icons.filled.EditCalendar
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -33,13 +31,13 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ash.axis.ui.BottomSpacer
 import com.ash.axis.ui.CalendarSection
+import com.ash.core.ui.components.AppCard
+import com.ash.core.ui.components.AppSectionLabel
 import com.ash.core.ui.components.AxisDatePickerDialog
 import com.ash.core.ui.components.LoadingStateContainer
 import com.ash.core.ui.components.OfflineBanner
 import com.ash.core.ui.components.PullToRefreshContainer
 import com.ash.core.ui.theme.AppDimens
-import com.ash.core.ui.theme.AppShapes
-import com.ash.core.ui.theme.cardColor
 import com.ash.core.util.Result
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -58,7 +56,8 @@ fun PlannerScreen(
     val result: Result<PlannerUiState> =
         when {
             state.isLoading -> Result.Loading
-            state.error != null && state.subjects.isEmpty() -> Result.Error(Exception(state.error), state.error)
+            state.error != null && state.subjects.isEmpty() && state.timetable.isEmpty() ->
+                Result.Error(Exception(state.error), state.error)
             else -> Result.Success(state)
         }
 
@@ -72,6 +71,11 @@ fun PlannerScreen(
                 if (data.isOffline) {
                     item(key = "offline_banner", contentType = "offline") {
                         OfflineBanner(visible = true)
+                    }
+                }
+                if (data.error != null) {
+                    item(key = "refresh_error", contentType = "status") {
+                        Text(data.error, color = MaterialTheme.colorScheme.error)
                     }
                 }
 
@@ -115,6 +119,7 @@ fun PlannerScreen(
                             holidayMode = data.holidayMode,
                             anchorDate = data.anchorDate,
                             dateTimetable = data.dateTimetable,
+                            coveredDates = data.coveredDates,
                             semesterEndDate = data.semesterEndDate,
                             interactionEnabled = data.todayAttendance != null,
                             onPreview = viewModel::previewDate,
@@ -130,16 +135,12 @@ fun PlannerScreen(
 
                 item(key = "projected_header", contentType = "projected_header") {
                     if (data.projected.isNotEmpty()) {
-                        Text(
+                        AppSectionLabel(
                             if (data.anchorDate != null) {
                                 "PROJECTED ON ${data.anchorDate.format(impactDateFormatter).uppercase()}"
                             } else {
                                 "BEST POSSIBLE BY SEMESTER END"
                             },
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.6.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
@@ -166,11 +167,7 @@ fun PlannerScreen(
 @Composable
 private fun SemesterEndGate(onSetDate: (String) -> Unit) {
     var showPicker by remember { mutableStateOf(false) }
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = AppShapes.medium,
-        color = cardColor(),
-    ) {
+    AppCard {
         Column(
             modifier = Modifier.padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
