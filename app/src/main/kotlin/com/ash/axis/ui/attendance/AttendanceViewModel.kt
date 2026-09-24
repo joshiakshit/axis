@@ -86,7 +86,7 @@ class AttendanceViewModel
             }
             viewModelScope.launch {
                 val semesterSnapshot =
-                    selectedSemester(coordinator, attendanceRepo, preferencesStore).flatMapLatest { semester ->
+                    selectedSemester(coordinator, attendanceRepo, preferencesStore, resolveLabel = true).flatMapLatest { semester ->
                         val context = coordinator.activeContext.value
                         if (context == null || semester == null) {
                             flowOf(semester to AcademicSnapshot<AttendanceResponse>())

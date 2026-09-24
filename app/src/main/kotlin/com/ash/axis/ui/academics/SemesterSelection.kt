@@ -20,6 +20,7 @@ internal fun selectedSemester(
     coordinator: AcademicDataCoordinator,
     attendance: AttendanceRepository,
     preferences: PreferencesStore,
+    resolveLabel: Boolean = false,
 ): Flow<SemesterOption?> =
     coordinator.activeContext.flatMapLatest { context ->
         if (context == null) {
@@ -33,6 +34,7 @@ internal fun selectedSemester(
                 .flatMapLatest { (year, classId) ->
                     flow {
                         if (year.isNotBlank() && classId.isNotBlank()) emit(SemesterOption(year, classId, ""))
+                        if (!resolveLabel && year.isNotBlank() && classId.isNotBlank()) return@flow
                         val resolved =
                             try {
                                 attendance.getPreferredSemester(context.admno, context.brId, year, classId)
