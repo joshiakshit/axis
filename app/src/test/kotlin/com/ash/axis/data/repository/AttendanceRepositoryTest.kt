@@ -26,11 +26,45 @@ import okhttp3.RequestBody
 import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Buffer
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import retrofit2.Response
 
 class AttendanceRepositoryTest {
+    @Test
+    fun `observable summary does not hydrate unscoped v2 attendance data`() =
+        runBlocking {
+            val api = mockk<ICloudEmsApi>()
+            val cacheDao = mockk<CacheDao>()
+            val authRepository = mockk<AuthRepository>()
+            val response = CompletableDeferred<Unit>()
+            coEvery { cacheDao.get(any()) } answers {
+                if (firstArg<String>().startsWith("v2_attendance_")) {
+                    CacheEntity("v2_attendance_21001_C1_2025-2026", """{"table":{},"endrow":{}}""")
+                } else {
+                    null
+                }
+            }
+            coEvery { authRepository.refreshTokenIfNeeded() } returns "token"
+            every { authRepository.getUserInfo() } returns UserInfo("21001", 11, "", "", "", "clientMixedCase")
+            coEvery { api.postAttendance(any()) } coAnswers {
+                response.await()
+                Response.success("""{"attendance":{"table":{},"endrow":{}}}""".toResponseBody())
+            }
+            coEvery { cacheDao.put(any()) } returns Unit
+            val repository = AttendanceRepository(api, mockk<QrAttendanceApi>(), cacheDao, authRepository, Json)
+            val key = AttendanceKey(StudentRequestContext("21001", 11, "clientMixedCase", "2026-2027"), "C1", "2025-2026")
+
+            val state = repository.requestSummary(key)
+
+            assertNull(state.value.data)
+            coVerify(exactly = 1) { cacheDao.get(key.cacheKey) }
+            coVerify(exactly = 0) { cacheDao.get(match { it.startsWith("v2_attendance_") }) }
+            response.complete(Unit)
+            withTimeout(5_000) { state.first { it.data != null && !it.refreshing } }
+        }
+
     @Test
     fun `legacy summary load keeps saved data after network failure`() =
         runTest {

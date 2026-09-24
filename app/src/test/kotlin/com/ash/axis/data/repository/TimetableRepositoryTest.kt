@@ -13,6 +13,7 @@ import io.mockk.just
 import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
@@ -44,6 +45,33 @@ class TimetableRepositoryTest {
             clientId = "clientMixedCase",
             academicYear = "2026-2027",
         )
+
+    @Test
+    fun `new week flow hydrates a context scoped v3 cache before route discovery`() =
+        runBlocking {
+            val started = CompletableDeferred<Unit>()
+            val pending = CompletableDeferred<Unit>()
+            val oldKey = "v3_timetable_weekly_21001_11_clientMixedCase_2026-2027_legacy_2026-09-07_2026-09-13"
+            coEvery { cacheDao.get(any()) } answers {
+                if (firstArg<String>() == oldKey) CacheEntity(oldKey, "{\"Mon\":[]}", 123L) else null
+            }
+            coEvery { authRepository.refreshTokenIfNeeded() } returns "access"
+            every { authRepository.getUserInfo() } returns UserInfo("21001", 11, "", "", "", "clientMixedCase")
+            coEvery { api.postTimetableV1(any()) } coAnswers {
+                started.complete(Unit)
+                pending.await()
+                success("""{"status":false}""")
+            }
+            val key = TimetableKey(context, "2026-09-07", "2026-09-13")
+
+            val state = repository.requestWeek(key)
+            withTimeout(5_000) { started.await() }
+
+            assertEquals(emptyList<String>(), state.value.data?.weekly?.get("Mon"))
+            assertEquals(null, state.value.data?.dated)
+            assertEquals(123L, state.value.updatedAtMillis)
+            repository.deactivateAcademicData()
+        }
 
     @Test
     fun `legacy requests keep the exact student context`() =

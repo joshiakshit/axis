@@ -8,12 +8,16 @@ import com.ash.axis.data.repository.TimetableKey
 import com.ash.axis.data.repository.TimetableRepository
 import com.ash.axis.domain.model.SemesterOption
 import com.ash.axis.domain.model.StudentRequestContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.LocalDate
@@ -22,8 +26,11 @@ import javax.inject.Singleton
 
 enum class AcademicDestination { HOME, ATTENDANCE, TIMETABLE, DAYWISE, PLANNER, OTHER }
 
+data class DaywiseRange(val year: String, val fromDate: String, val toDate: String)
+
 /** Starts only the current visible demand and the two core warmup loads. */
 @Singleton
+@Suppress("TooGenericExceptionCaught")
 class AcademicDataCoordinator
     @Inject
     constructor(
@@ -36,6 +43,12 @@ class AcademicDataCoordinator
         private var active: StudentRequestContext? = null
         private val mutableActiveContext = MutableStateFlow<StudentRequestContext?>(null)
         val activeContext: StateFlow<StudentRequestContext?> = mutableActiveContext
+        private val mutableAttendanceDemandError = MutableStateFlow<Throwable?>(null)
+        val attendanceDemandError: StateFlow<Throwable?> = mutableAttendanceDemandError
+        private val mutableTimetableDemandError = MutableStateFlow<Throwable?>(null)
+        val timetableDemandError: StateFlow<Throwable?> = mutableTimetableDemandError
+        private val mutableDaywiseDemandError = MutableStateFlow<Throwable?>(null)
+        val daywiseDemandError: StateFlow<Throwable?> = mutableDaywiseDemandError
         private var semester: SemesterOption? = null
         private var currentWeek: Pair<String, String>? = null
         private var generation = 0L
@@ -45,6 +58,7 @@ class AcademicDataCoordinator
             selectedSemester: SemesterOption?,
             weekStart: LocalDate,
             destination: AcademicDestination = AcademicDestination.HOME,
+            visibleDaywise: DaywiseRange? = null,
         ) {
             mutex.withLock {
                 attendance.deactivateAcademicData()
@@ -54,10 +68,19 @@ class AcademicDataCoordinator
                 mutableActiveContext.value = context
                 semester = selectedSemester
                 currentWeek = weekRange(weekStart)
+                mutableAttendanceDemandError.value = null
+                mutableTimetableDemandError.value = null
+                mutableDaywiseDemandError.value = null
             }
             when (destination) {
                 AcademicDestination.ATTENDANCE -> attendanceVisible()
                 AcademicDestination.TIMETABLE -> timetableVisible(weekStart)
+                AcademicDestination.PLANNER -> plannerVisible(weekStart)
+                AcademicDestination.DAYWISE -> {
+                    val range = requireNotNull(visibleDaywise) { "Day-wise activation needs its visible range" }
+                    daywiseVisible(range.year, range.fromDate, range.toDate)
+                }
+                AcademicDestination.OTHER -> otherVisible()
                 else -> warmCore()
             }
         }
@@ -69,6 +92,9 @@ class AcademicDataCoordinator
                 mutableActiveContext.value = null
                 semester = null
                 currentWeek = null
+                mutableAttendanceDemandError.value = null
+                mutableTimetableDemandError.value = null
+                mutableDaywiseDemandError.value = null
                 attendance.deactivateAcademicData()
                 timetable.deactivateAcademicData()
             }
@@ -80,14 +106,12 @@ class AcademicDataCoordinator
         }
 
         suspend fun attendanceVisible() {
-            requestSummary()
-            scope.launch { requestCurrentWeek() }
+            startBoth(::safeSummary, ::safeWeek)
         }
 
         suspend fun timetableVisible(weekStart: LocalDate) {
             mutex.withLock { currentWeek = weekRange(weekStart) }
-            requestCurrentWeek()
-            scope.launch { requestSummary() }
+            startBoth(::safeWeek, ::safeSummary)
         }
 
         suspend fun homeVisible() = warmCore()
@@ -101,12 +125,10 @@ class AcademicDataCoordinator
             fromDate: String,
             toDate: String,
         ) {
-            mutex.withLock {
-                val context = active ?: return
-                val key = DaywiseKey(context, year, fromDate, toDate)
-                attendance.requestDaywise(key)
-            }
-            scope.launch { warmCore() }
+            startBoth(
+                { safeDaywise(year, fromDate, toDate) },
+                { warmCore() },
+            )
         }
 
         suspend fun plannerVisible(weekStart: LocalDate) = timetableVisible(weekStart)
@@ -126,11 +148,11 @@ class AcademicDataCoordinator
         }
 
         suspend fun refreshTimetable() {
-            val before = mutex.withLock { active ?: return }
+            val (before, observedGeneration) = mutex.withLock { Pair(active ?: return, generation) }
             val refreshed = auth.requireStudentRequestContext(forceProfileRefresh = true)
             mutex.withLock {
                 val current = active ?: return
-                if (current != before || !sameAccount(current, refreshed)) return
+                if (generation != observedGeneration || current != before || !sameAccount(current, refreshed)) return
                 active = refreshed
                 mutableActiveContext.value = refreshed
                 val week = currentWeek ?: return
@@ -156,8 +178,62 @@ class AcademicDataCoordinator
         }
 
         private suspend fun warmCore() {
-            requestSummary()
-            requestCurrentWeek()
+            startBoth(::safeSummary, ::safeWeek)
+        }
+
+        private suspend fun startBoth(
+            visible: suspend () -> Unit,
+            next: suspend () -> Unit,
+        ) {
+            supervisorScope {
+                val visibleLoad = async(start = CoroutineStart.UNDISPATCHED) { visible() }
+                val nextLoad = async(start = CoroutineStart.UNDISPATCHED) { next() }
+                visibleLoad.await()
+                nextLoad.await()
+            }
+        }
+
+        private suspend fun safeSummary() {
+            val observedGeneration = mutex.withLock { generation }
+            try {
+                requestSummary()
+                mutex.withLock { if (generation == observedGeneration) mutableAttendanceDemandError.value = null }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                mutex.withLock { if (generation == observedGeneration) mutableAttendanceDemandError.value = error }
+            }
+        }
+
+        private suspend fun safeWeek() {
+            val observedGeneration = mutex.withLock { generation }
+            try {
+                requestCurrentWeek()
+                mutex.withLock { if (generation == observedGeneration) mutableTimetableDemandError.value = null }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                mutex.withLock { if (generation == observedGeneration) mutableTimetableDemandError.value = error }
+            }
+        }
+
+        private suspend fun safeDaywise(
+            year: String,
+            fromDate: String,
+            toDate: String,
+        ) {
+            val observedGeneration = mutex.withLock { generation }
+            try {
+                mutex.withLock {
+                    val context = active ?: return
+                    attendance.requestDaywise(DaywiseKey(context, year, fromDate, toDate))
+                }
+                mutex.withLock { if (generation == observedGeneration) mutableDaywiseDemandError.value = null }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                mutex.withLock { if (generation == observedGeneration) mutableDaywiseDemandError.value = error }
+            }
         }
 
         private suspend fun requestSummary(force: Boolean = false) {
@@ -183,7 +259,7 @@ class AcademicDataCoordinator
                     resolved
                 }
             mutex.withLock {
-                if (active != context) return
+                if (generation != state.second || active != context) return
                 val week = currentWeek ?: return
                 timetable.requestWeek(TimetableKey(context, week.first, week.second))
             }
