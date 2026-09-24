@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
@@ -20,6 +22,7 @@ import java.time.LocalDate
 import kotlin.math.absoluteValue
 
 @OptIn(ExperimentalFoundationApi::class)
+@Suppress("LongMethod")
 @Composable
 internal fun TimetableContent(
     data: TimetableUiState,
@@ -57,6 +60,13 @@ internal fun TimetableContent(
         if (data.isOffline) {
             OfflineBanner(visible = true)
         }
+        if (data.error != null) {
+            Text(
+                data.error,
+                modifier = Modifier.padding(horizontal = AppDimens.screenPadding),
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
         TimetableHeader(
             currentDate = data.currentDate,
             onToday = { viewModel.jumpTo(LocalDate.now()) },
@@ -80,9 +90,7 @@ internal fun TimetableContent(
             pagerState = pagerState,
             dayCache = data.dayCache,
             loadedWeeks = data.loadedWeeks,
-            loadingWeeks = data.loadingWeeks,
             failedWeeks = data.failedWeeks,
-            onNeedWeek = viewModel::ensureWeek,
             onRetry = viewModel::retryWeek,
         )
     }

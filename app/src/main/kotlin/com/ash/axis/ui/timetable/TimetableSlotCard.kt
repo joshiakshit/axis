@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -29,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ash.core.ui.components.AppCard
 import com.ash.core.ui.components.StatusBadge
 import com.ash.core.ui.theme.AppDimens
 import com.ash.core.ui.theme.AppShapes
@@ -54,9 +54,8 @@ internal fun TimetableSlotCard(
         label = "slot-progress",
     )
 
-    Surface(
+    AppCard(
         modifier = modifier.fillMaxWidth(),
-        shape = AppShapes.medium,
         color =
             when {
                 isSub -> subColor.copy(alpha = 0.06f)

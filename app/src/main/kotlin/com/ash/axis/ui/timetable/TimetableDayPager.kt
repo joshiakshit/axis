@@ -25,7 +25,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -54,9 +53,7 @@ internal fun TimetableDayPager(
     pagerState: PagerState,
     dayCache: ImmutableMap<LocalDate, TimetableDay>,
     loadedWeeks: ImmutableSet<LocalDate>,
-    loadingWeeks: ImmutableSet<LocalDate>,
     failedWeeks: ImmutableSet<LocalDate>,
-    onNeedWeek: (LocalDate) -> Unit,
     onRetry: (LocalDate) -> Unit,
 ) {
     HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
@@ -65,13 +62,7 @@ internal fun TimetableDayPager(
         val date = dateForPage(anchor, page)
         val weekStart = date.with(DayOfWeek.MONDAY)
         val isLoaded = weekStart in loadedWeeks
-        val isLoading = weekStart in loadingWeeks
         val isFailed = weekStart in failedWeeks
-
-        // Swiping can reach dates beyond the prefetched weeks.
-        LaunchedEffect(weekStart, isLoaded, isLoading, isFailed) {
-            if (!isLoaded && !isLoading && !isFailed) onNeedWeek(date)
-        }
 
         Box(
             modifier =

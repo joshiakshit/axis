@@ -2,13 +2,12 @@ package com.ash.axis.ui.timetable
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.ash.axis.data.DataRefreshSignal
-import com.ash.axis.data.RefreshTrigger
+import com.ash.axis.data.academic.AcademicDataCoordinator
 import com.ash.axis.data.export.ExportKeys
 import com.ash.axis.data.repository.AuthRepository
 import com.ash.axis.data.repository.CalendarRepository
+import com.ash.axis.data.repository.TimetableKey
 import com.ash.axis.data.repository.TimetableRepository
-import com.ash.axis.domain.model.StudentRequestContext
 import com.ash.axis.domain.model.TimetableSlot
 import com.ash.axis.domain.usecase.TimetableUseCase
 import com.ash.axis.ui.CalendarUiState
@@ -26,12 +25,13 @@ import kotlinx.collections.immutable.persistentSetOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.collections.immutable.toImmutableMap
 import kotlinx.collections.immutable.toImmutableSet
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
@@ -84,38 +84,53 @@ class TimetableViewModel
     @Inject
     constructor(
         private val timetableRepo: TimetableRepository,
+        private val coordinator: AcademicDataCoordinator,
         private val authRepository: AuthRepository,
         private val calendarRepo: CalendarRepository,
         private val timetableUseCase: TimetableUseCase,
         private val preferencesStore: PreferencesStore,
         private val networkMonitor: NetworkMonitor,
-        private val refreshSignal: DataRefreshSignal,
     ) : ViewModel() {
-        private val refreshSourceId = DataRefreshSignal.newSourceId()
-
         private val _state = MutableStateFlow(TimetableUiState())
         val state: StateFlow<TimetableUiState> = _state.asStateFlow()
 
         private val dayOrder = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
-        // Keep raw slots so the ticker can update today's progress.
-        private val rawByWeek = mutableMapOf<LocalDate, Map<String, List<TimetableSlot>>>()
+        private val weekJobs = mutableMapOf<LocalDate, Job>()
+        private var boundContext = coordinator.activeContext.value
         private var calendarJob: Job? = null
         private var calendarMonth: LocalDate? = null
 
         init {
             val today = LocalDate.now()
             _state.update { it.copy(anchorDate = today, currentDate = today) }
-            ensureWeekInternal(today, forceRefresh = false, isInitial = true)
+            viewModelScope.launch {
+                coordinator.activeContext.collectLatest { context ->
+                    if (context == boundContext) return@collectLatest
+                    boundContext = context
+                    weekJobs.values.forEach { it.cancel() }
+                    weekJobs.clear()
+                    _state.update {
+                        it.copy(
+                            dayCache = persistentMapOf(),
+                            loadedWeeks = persistentSetOf(),
+                            loadingWeeks = persistentSetOf(),
+                            failedWeeks = persistentSetOf(),
+                            isLoading = context != null,
+                            error = null,
+                        )
+                    }
+                    if (context != null) ensureWeek(_state.value.currentDate)
+                }
+            }
+            ensureWeek(today)
             startProgressTicker()
             loadCalendar()
+            viewModelScope.launch { networkMonitor.isOnline.collect { online -> _state.update { it.copy(isOffline = !online) } } }
             viewModelScope.launch {
-                refreshSignal.signal.collect { event ->
-                    if (event.sourceId != refreshSourceId &&
-                        (event.trigger == RefreshTrigger.ALL || event.trigger == RefreshTrigger.TIMETABLE)
-                    ) {
-                        val ws = weekStart(_state.value.currentDate)
-                        ensureWeekInternal(ws, forceRefresh = false, isInitial = false)
+                coordinator.timetableDemandError.collect { error ->
+                    if (error != null && _state.value.dayCache.isEmpty()) {
+                        _state.update { it.copy(isLoading = false, error = ErrorText.forData(error)) }
                     }
                 }
             }
@@ -126,8 +141,6 @@ class TimetableViewModel
             loadCalendar()
             persistViewDate(date)
             ensureWeek(date)
-            ensureWeek(date.plusDays(1))
-            ensureWeek(date.minusDays(1))
         }
 
         fun jumpTo(date: LocalDate) {
@@ -145,122 +158,83 @@ class TimetableViewModel
             if (_state.value.jumpTarget != null) _state.update { it.copy(jumpTarget = null) }
         }
 
-        fun ensureWeek(date: LocalDate) = ensureWeekInternal(date, forceRefresh = false, isInitial = false)
+        fun ensureWeek(date: LocalDate) = bindWeek(date, retry = false)
 
-        fun retryWeek(date: LocalDate) = ensureWeekInternal(date, forceRefresh = true, isInitial = false)
+        fun retryWeek(date: LocalDate) = bindWeek(date, retry = true)
 
         fun refresh() {
             loadCalendar(forceRefresh = true)
-            val ws = weekStart(_state.value.currentDate)
             viewModelScope.launch {
-                _state.update { it.copy(isRefreshing = true) }
                 try {
-                    val context = authRepository.requireStudentRequestContext(forceProfileRefresh = true)
-                    loadWeek(ws, context, forceRefresh = true)
-                    refreshSignal.emit(RefreshTrigger.TIMETABLE, refreshSourceId)
-                } catch (e: Exception) {
-                    val offline = networkMonitor.isOnline.first().not()
-                    _state.update {
-                        it.copy(
-                            isOffline = offline,
-                            failedWeeks = (it.failedWeeks + ws).toImmutableSet(),
-                            error = if (it.dayCache.isEmpty()) ErrorText.forData(e) else it.error,
-                        )
-                    }
-                } finally {
-                    _state.update { it.copy(isRefreshing = false) }
+                    coordinator.refreshTimetable()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    _state.update { it.copy(isRefreshing = false, error = ErrorText.forData(error)) }
                 }
             }
         }
 
-        private fun ensureWeekInternal(
+        @Suppress("CyclomaticComplexMethod")
+        private fun bindWeek(
             date: LocalDate,
-            forceRefresh: Boolean,
-            isInitial: Boolean,
+            retry: Boolean,
         ) {
             val ws = weekStart(date)
-            val snapshot = _state.value
-            if (!forceRefresh && (ws in snapshot.loadedWeeks || ws in snapshot.loadingWeeks)) {
-                if (isInitial) _state.update { it.copy(isLoading = false) }
-                return
-            }
-            // Reserve synchronously to prevent duplicate prefetches.
-            _state.update {
-                it.copy(
-                    loadingWeeks = (it.loadingWeeks + ws).toImmutableSet(),
-                    failedWeeks = (it.failedWeeks - ws).toImmutableSet(),
-                )
-            }
-
-            viewModelScope.launch {
-                try {
-                    val context = authRepository.requireStudentRequestContext(forceProfileRefresh = forceRefresh)
-                    var showedCache = false
-                    if (!forceRefresh) {
-                        val peek =
-                            runCatching {
-                                timetableRepo.peekTimetable(context, ws.toString(), ws.plusDays(6).toString())
-                            }.getOrNull()
-                        if (peek != null) {
-                            applyWeek(ws, peek.data)
-                            showedCache = true
-                            if (!peek.isStale) return@launch
+            weekJobs.keys.filter { it != ws }.forEach { old -> weekJobs.remove(old)?.cancel() }
+            if (weekJobs[ws]?.isActive == true && !retry) return
+            weekJobs[ws]?.cancel()
+            weekJobs[ws] =
+                viewModelScope.launch {
+                    try {
+                        val context = coordinator.activeContext.value ?: return@launch
+                        val key = TimetableKey(context, ws.toString(), ws.plusDays(6).toString())
+                        val snapshot = timetableRepo.observeWeek(key)
+                        launch {
+                            if (retry) {
+                                coordinator.refreshTimetable()
+                            } else {
+                                coordinator.timetableVisible(ws)
+                            }
                         }
+                        snapshot.collect { result ->
+                            if (coordinator.activeContext.value != context) return@collect
+                            val days =
+                                result.data?.let { data ->
+                                    (0..6).associate { i ->
+                                        val day = ws.plusDays(i.toLong())
+                                        val slots = data.dated?.get(day.toString()) ?: data.weekly[dayOrder[i]].orEmpty()
+                                        day to buildDay(day, dayOrder[i], slots)
+                                    }
+                                }
+                            _state.update { current ->
+                                current.copy(
+                                    dayCache = if (days == null) current.dayCache else (current.dayCache + days).toImmutableMap(),
+                                    loadedWeeks = if (days == null) current.loadedWeeks else (current.loadedWeeks + ws).toImmutableSet(),
+                                    loadingWeeks =
+                                        if (result.refreshing) {
+                                            (current.loadingWeeks + ws).toImmutableSet()
+                                        } else {
+                                            (current.loadingWeeks - ws).toImmutableSet()
+                                        },
+                                    failedWeeks =
+                                        if (result.error != null && days == null) {
+                                            (current.failedWeeks + ws).toImmutableSet()
+                                        } else {
+                                            (current.failedWeeks - ws).toImmutableSet()
+                                        },
+                                    isLoading = false,
+                                    isRefreshing = result.refreshing && ws == weekStart(current.currentDate),
+                                    error = result.error?.let(ErrorText::forData),
+                                )
+                            }
+                        }
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        _state.update { it.copy(isLoading = false, error = ErrorText.forData(error)) }
                     }
-                    loadWeek(ws, context, forceRefresh = forceRefresh || showedCache)
-                } catch (e: Exception) {
-                    val offline = networkMonitor.isOnline.first().not()
-                    _state.update {
-                        it.copy(
-                            loadingWeeks = (it.loadingWeeks - ws).toImmutableSet(),
-                            failedWeeks = (it.failedWeeks + ws).toImmutableSet(),
-                            isOffline = offline,
-                            error = if (isInitial && it.dayCache.isEmpty()) ErrorText.forData(e) else it.error,
-                        )
-                    }
-                } finally {
-                    if (isInitial) _state.update { it.copy(isLoading = false) }
                 }
-            }
-        }
-
-        private suspend fun loadWeek(
-            ws: LocalDate,
-            context: StudentRequestContext,
-            forceRefresh: Boolean,
-        ) {
-            val timetable =
-                timetableRepo.getTimetable(
-                    context,
-                    ws.toString(),
-                    ws.plusDays(6).toString(),
-                    forceRefresh,
-                )
-            applyWeek(ws, timetable)
-        }
-
-        private suspend fun applyWeek(
-            ws: LocalDate,
-            timetable: Map<String, List<TimetableSlot>>,
-        ) {
-            rawByWeek[ws] = timetable
-            val newDays =
-                (0..6).associate { i ->
-                    val date = ws.plusDays(i.toLong())
-                    val day = buildDay(date, dayOrder[i], timetable[dayOrder[i]] ?: emptyList())
-                    date to day
-                }
-            val offline = networkMonitor.isOnline.first().not()
-            _state.update {
-                it.copy(
-                    dayCache = (it.dayCache + newDays).toImmutableMap(),
-                    loadedWeeks = (it.loadedWeeks + ws).toImmutableSet(),
-                    loadingWeeks = (it.loadingWeeks - ws).toImmutableSet(),
-                    failedWeeks = (it.failedWeeks - ws).toImmutableSet(),
-                    isOffline = offline,
-                    error = null,
-                )
-            }
         }
 
         @Suppress("CyclomaticComplexMethod")
@@ -318,11 +292,14 @@ class TimetableViewModel
                     delay(60_000)
                     val today = LocalDate.now()
                     val ws = weekStart(today)
-                    val raw = rawByWeek[ws]
-                    if (raw != null && ws in _state.value.loadedWeeks) {
+                    val context = coordinator.activeContext.value
+                    if (context != null && ws in _state.value.loadedWeeks) {
+                        val data = timetableRepo.observeWeek(TimetableKey(context, ws.toString(), ws.plusDays(6).toString())).value.data
                         val dayName = dayOrder[(today.dayOfWeek.value - 1).coerceIn(0, 6)]
-                        val rebuilt = buildDay(today, dayName, raw[dayName] ?: emptyList())
-                        _state.update { it.copy(dayCache = (it.dayCache + (today to rebuilt)).toImmutableMap()) }
+                        if (data != null) {
+                            val rebuilt = buildDay(today, dayName, data.dated?.get(today.toString()) ?: data.weekly[dayName].orEmpty())
+                            _state.update { it.copy(dayCache = (it.dayCache + (today to rebuilt)).toImmutableMap()) }
+                        }
                     }
                 }
             }
