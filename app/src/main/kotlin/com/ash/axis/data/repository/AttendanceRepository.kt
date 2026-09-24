@@ -42,15 +42,6 @@ class AttendanceRepository
         private val acadYearListSerializer = ListSerializer(AcadYear.serializer())
         private val classInfoListSerializer = ListSerializer(ClassInfo.serializer())
 
-        suspend fun getLatestSemester(
-            admno: String,
-            brId: Int,
-            forceRefresh: Boolean = false,
-        ): SemesterOption {
-            return getSemesterOptions(admno, brId, forceRefresh).firstOrNull()
-                ?: error("No semester data found. Your classes may not be enrolled yet.")
-        }
-
         suspend fun getPreferredSemester(
             admno: String,
             brId: Int,

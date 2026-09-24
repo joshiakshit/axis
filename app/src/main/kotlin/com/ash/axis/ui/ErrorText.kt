@@ -46,8 +46,7 @@ object ErrorText {
             else -> t.message?.takeIf { it.isNotBlank() } ?: GENERIC
         }
 
-    // Detect the server's "already linked to another device" one-device-per-account lock so we can
-    // tell the user exactly what to do (re-logging in here re-claims the account for this device).
+    // Signing in again reclaims an account linked to another device.
     fun isDeviceLocked(t: Throwable): Boolean {
         val msg = t.message ?: return false
         return msg.contains("another device", ignoreCase = true) ||

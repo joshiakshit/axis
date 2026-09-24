@@ -19,7 +19,7 @@ val localProps =
 val apiAuthToken = localProps.getProperty("API_AUTH_TOKEN", "")
 val remoteConfigUrl = localProps.getProperty("REMOTE_CONFIG_URL", "")
 
-// Version is single-sourced in version.properties and bumped by scripts/release.sh (never edit by hand).
+// Update versions through scripts/release.sh.
 val versionProps =
     Properties().apply {
         val f = rootProject.file("version.properties")
@@ -48,8 +48,7 @@ android {
         buildConfigField("String", "API_AUTH_TOKEN", "\"$apiAuthToken\"")
         buildConfigField("String", "REMOTE_CONFIG_URL", "\"$remoteConfigUrl\"")
 
-        // Axis ships an English-only UI; keep only English resources from libraries (AndroidX, Material,
-        // CameraX, ML Kit) to trim the APK. Drop this if the app is ever localized.
+        // The UI is English-only; drop unused library translations.
         resourceConfigurations += "en"
     }
 
@@ -68,15 +67,11 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            // Ship only ARM native libraries in the distributed build. x86/x86_64 exist only for emulators —
-            // dropping them removes ~12 MB of ML Kit's libbarhopper while keeping a single universal APK
-            // (arm64 + 32-bit arm) for real phones. Debug stays universal for emulator development.
+            // Exclude emulator ABIs from releases to reduce APK size.
             ndk {
                 abiFilters += listOf("arm64-v8a", "armeabi-v7a")
             }
-            // Use the real release keystore when configured; otherwise fall back to the debug key so local
-            // `assembleRelease` still produces an installable APK. NOTE: over-the-air auto-updates require the
-            // *same* signing key as the installed build, so distribute only builds signed with your real key.
+            // Distributed updates must use the same signing key as the installed app.
             signingConfig =
                 if (releaseStoreFile.isNotBlank()) {
                     signingConfigs.getByName("release")
@@ -110,9 +105,8 @@ android {
 
     composeCompiler {
         stabilityConfigurationFile = project.layout.projectDirectory.file("compose-stability.conf")
-        // Drops the wrapper group emitted around non-skipping composables — smaller codegen, less runtime work.
         featureFlags.add(ComposeFeatureFlag.OptimizeNonSkippingGroups)
-        // Opt-in recomposition metrics: ./gradlew :app:compileReleaseKotlin -PcomposeMetrics=true
+        // ./gradlew :app:compileReleaseKotlin -PcomposeMetrics=true
         if (project.findProperty("composeMetrics") == "true") {
             metricsDestination = layout.buildDirectory.dir("compose_metrics")
             reportsDestination = layout.buildDirectory.dir("compose_metrics")

@@ -18,8 +18,6 @@ internal data class PdfSection(
     val lines: List<String>,
 )
 
-// Minimal A4 PDF composer for the export feature. Two layouts: a column table (attendance) and
-// headed sections (timetable). Handles page breaks; everything is black text on white.
 @Suppress("TooManyFunctions")
 internal object PdfDocuments {
     private const val PAGE_WIDTH = 595
@@ -160,7 +158,6 @@ internal object PdfDocuments {
     }
 }
 
-// Mutable page-walk state; all drawing math lives in PdfDocuments so this stays a dumb holder.
 private class PageState(
     val doc: PdfDocument,
     var page: PdfDocument.Page,

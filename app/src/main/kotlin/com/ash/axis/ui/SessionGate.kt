@@ -23,11 +23,9 @@ internal fun SessionGate(
     var addingAccount by rememberSaveable { mutableStateOf(false) }
 
     when {
-        // No accounts yet — first sign-in.
         !account.isLoggedIn -> {
             LoginScreen(onLoginSuccess = { viewModel.refresh() })
         }
-        // Adding a sibling's account on top of an existing session.
         addingAccount -> {
             BackHandler { addingAccount = false }
             LoginScreen(
@@ -37,8 +35,7 @@ internal fun SessionGate(
                 },
             )
         }
-        // Keyed on the active account so switching recreates every screen/ViewModel with the new
-        // account's (already admno-scoped) data. AccessGate re-checks governance for that account.
+        // Recreate screens and ViewModels when the active account changes.
         else -> {
             AccessGate(
                 activeAdmno = account.activeAdmno,

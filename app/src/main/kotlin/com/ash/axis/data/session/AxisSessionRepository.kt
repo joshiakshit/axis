@@ -17,8 +17,7 @@ import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// Access decision surfaced to the gate. Only an explicit `pending` blocks — unknown / offline / disabled all
-// fall through (fail-open), so a network hiccup can never lock a user out of the app.
+// Unknown access permits use. Network errors retain the last known status.
 data class Access(
     val enabled: Boolean,
     val status: String,
@@ -26,9 +25,6 @@ data class Access(
     val checking: Boolean,
 )
 
-// Client half of the governance layer. Calls POST /v1/session for the active account, caches the result
-// per-admno, and hands the gate the current access decision. `api` is null when the
-// build has no REMOTE_CONFIG_URL, which disables governance entirely (the app runs ungoverned).
 @Singleton
 class AxisSessionRepository
     @Inject
@@ -49,8 +45,7 @@ class AxisSessionRepository
 
         private fun authHeader(): String? = token?.let { "Bearer $it" }
 
-        // Load the active account's last-known access from disk so a returning pending/approved user is gated
-        // correctly before the network responds.
+        // Apply cached access before the network responds.
         suspend fun hydrate() {
             if (!enabled) return
             val raw = preferencesStore.getUserString(KEY, "").first()
@@ -58,7 +53,7 @@ class AxisSessionRepository
             runCatching { json.decodeFromString<AxisSession>(raw) }.getOrNull()?.let { publish(it) }
         }
 
-        // Re-check access for the active account. Network/server errors keep the last-known status.
+        // Network errors retain the last known access status.
         @Suppress("TooGenericExceptionCaught")
         suspend fun refresh() {
             val client = api ?: return
@@ -75,7 +70,6 @@ class AxisSessionRepository
             }
         }
 
-        // The active token plus best-effort device/build telemetry for the admin dashboard.
         private fun sessionRequest(token: String) =
             SessionRequest(
                 token = token,
@@ -86,7 +80,6 @@ class AxisSessionRepository
                 deviceId = deviceIdProvider.get(),
             )
 
-        // Fire-and-forget usage report. No session token yet (governance disabled or first launch) → silently skip.
         @Suppress("TooGenericExceptionCaught")
         suspend fun logEvents(events: List<UsageEvent>) {
             val client = api ?: return

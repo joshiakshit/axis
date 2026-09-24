@@ -162,7 +162,6 @@ internal fun DayStrip(
     val listState = rememberLazyListState()
     val currentIndex = pageForDate(anchor, currentDate)
 
-    // Keep the selected day comfortably in view (a couple of days of lead-in), following jumps/swipes.
     LaunchedEffect(currentIndex) {
         listState.animateScrollToItem((currentIndex - 2).coerceAtLeast(0))
     }
@@ -235,7 +234,7 @@ private fun DayChip(
                 fontWeight = FontWeight.Medium,
                 color = labelColor,
             )
-            // Fixed-size slot keeps every chip the same height whether or not it shows a dot.
+            // Reserve the dot height so all chips have the same height.
             Box(modifier = Modifier.padding(top = 3.dp).size(4.dp)) {
                 if (hasClasses) {
                     Box(

@@ -82,7 +82,6 @@ internal fun QrScanScreen(
                 modifier = Modifier.fillMaxSize(),
             )
 
-            // Scan-frame reticle
             Box(
                 modifier =
                     Modifier

@@ -22,10 +22,9 @@ import java.io.OutputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// Progress of an in-app update, surfaced to the update UI.
 data class UpdateState(
     val stage: UpdateStage = UpdateStage.IDLE,
-    // 0..1 when the download size is known, -1 = indeterminate.
+    // 0..1 when the download size is known; -1 otherwise.
     val progress: Float = -1f,
     val error: String? = null,
 )
@@ -36,9 +35,6 @@ enum class UpdateStage {
     OPENING_INSTALLER,
 }
 
-// True one-tap update: downloads the APK named by remote config and hands it to the system PackageInstaller,
-// which shows the standard confirm dialog and swaps the app in place — no browser, no manual "open the file".
-// Hosting-agnostic: `updateUrl` can be the Axis Worker's /v1/apk or any direct .apk link.
 @Singleton
 class UpdateInstaller
     @Inject
@@ -50,11 +46,9 @@ class UpdateInstaller
         val state: StateFlow<UpdateState> = mutableState.asStateFlow()
         private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 
-        // An update exists when the backend advertises a newer build than the one installed and gives us a link.
         fun updateAvailable(config: RemoteConfig): Boolean =
             config.latestVersionCode > BuildConfig.VERSION_CODE && config.updateUrl.isNotBlank()
 
-        // Android blocks silent installs: the user must have granted this app "install unknown apps".
         fun canInstall(): Boolean = context.packageManager.canRequestPackageInstalls()
 
         fun requestInstallPermission() {
@@ -95,8 +89,7 @@ class UpdateInstaller
             return BuildConfig.VERSION_NAME
         }
 
-        // Download the APK and hand it to the system. The commit result comes back asynchronously to
-        // InstallReceiver, which launches the system confirm dialog.
+        // InstallReceiver handles the commit result and opens the system confirmation.
         private fun stream(url: String) {
             client.newCall(Request.Builder().url(url).build()).execute().use { response ->
                 val body = response.body ?: error("empty response")
@@ -105,7 +98,6 @@ class UpdateInstaller
             }
         }
 
-        // Stream `body` straight into a PackageInstaller session, then commit it.
         private fun install(
             body: ResponseBody,
             total: Long,
@@ -125,7 +117,6 @@ class UpdateInstaller
             }
         }
 
-        // Copy bytes, publishing download progress when the total size is known.
         private fun pump(
             body: ResponseBody,
             out: OutputStream,

@@ -19,7 +19,7 @@ data class StudentMarker(
 
 fun StudentMarker.includes(date: LocalDate): Boolean = date in startDate..endDate
 
-// Exam periods and holidays both stop regular teaching, so their days drop out of the projection.
+// Exams and holidays exclude teaching days from projections.
 fun markerNoClassDates(markers: Iterable<StudentMarker>): Set<LocalDate> {
     val dates = mutableSetOf<LocalDate>()
     markers.forEach { marker ->

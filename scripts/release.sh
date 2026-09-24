@@ -1,21 +1,9 @@
 #!/usr/bin/env bash
-#
-# One-command release: bump the version, build the signed APK, upload it to the Axis Worker (R2), and flip the
-# "latest build" config so every installed app offers the update. No more manual editing.
-#
-# Versioning: 1.MINOR.PATCH. Bump the minor for a feature release, the patch for fixes.
-#
-#   scripts/release.sh                 # auto-bump patch (1.1.0 -> 1.1.1), advertise as the latest build
-#   scripts/release.sh 1.2.0           # set an explicit versionName, e.g. a feature release
-#   scripts/release.sh 1.2.0 --code=9  # set an explicit versionName and versionCode
-#   scripts/release.sh --force         # ALSO raise the force-update floor (blocks old builds until updated)
-#   scripts/release.sh 1.2.0 --force   # both
-#   scripts/release.sh --check         # run the full test/lint gate before building
-#   scripts/release.sh 1.2.0 --prepare # build the release APK without uploading or advertising it
-#   scripts/release.sh --publish-prepared --sha256=HASH # publish the prepared APK after review
-#
-# Requires in local.properties:  REMOTE_CONFIG_URL, ADMIN_TOKEN  (and the RELEASE_* signing keys for a real
-# distributable build). Requires an R2 bucket bound in the Worker (see backend/README.md → One-tap updates).
+# Build, upload, and advertise a release. With no version argument, bump the patch version.
+# Usage: scripts/release.sh [VERSION] [--code=N] [--force] [--check] [--prepare]
+# --force blocks older builds. --check runs tests and lint. --prepare stops before upload.
+# Publish a prepared APK: scripts/release.sh --publish-prepared --sha256=HASH [--force]
+# Requires REMOTE_CONFIG_URL, ADMIN_TOKEN, and RELEASE_* signing keys in local.properties, plus Worker R2.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -32,7 +20,6 @@ ADMIN_TOKEN="$(prop ADMIN_TOKEN)"
 [ -n "$BASE" ]        || { echo "✗ REMOTE_CONFIG_URL missing from local.properties"; exit 1; }
 [ -n "$ADMIN_TOKEN" ] || { echo "✗ ADMIN_TOKEN missing from local.properties (wrangler secret value)"; exit 1; }
 
-# --- args ---------------------------------------------------------------------------------------------
 FORCE=0; CHECK=0; PREPARE=0; PUBLISH_PREPARED=0; EXPECTED_SHA256=""; NEW_NAME=""; NEW_CODE=""
 for a in "$@"; do
   case "$a" in
@@ -56,7 +43,6 @@ elif [ -n "$EXPECTED_SHA256" ]; then
   echo "--sha256 requires --publish-prepared"; exit 1
 fi
 
-# --- bump version.properties --------------------------------------------------------------------------
 OLD_CODE="$(grep -E '^VERSION_CODE=' version.properties | cut -d= -f2- | tr -d '\r')"
 OLD_NAME="$(grep -E '^VERSION_NAME=' version.properties | cut -d= -f2- | tr -d '\r')"
 if [ "$PUBLISH_PREPARED" = 1 ]; then
@@ -70,13 +56,12 @@ else
   [ "$NEW_CODE" -gt "$OLD_CODE" ] || { echo "version code must be greater than $OLD_CODE"; exit 1; }
   if [ -z "$NEW_NAME" ]; then
     IFS=. read -r MA MI PA <<<"$OLD_NAME"
-    NEW_NAME="${MA:-1}.${MI:-0}.$(( ${PA:-0} + 1 ))"   # auto patch-bump
+    NEW_NAME="${MA:-1}.${MI:-0}.$(( ${PA:-0} + 1 ))"
   fi
   printf 'VERSION_CODE=%s\nVERSION_NAME=%s\n' "$NEW_CODE" "$NEW_NAME" > version.properties
   echo "▸ version  $OLD_NAME ($OLD_CODE) → $NEW_NAME ($NEW_CODE)"
 fi
 
-# --- build ---------------------------------------------------------------------------------------------
 if [ "$PUBLISH_PREPARED" = 0 ]; then
   if [ "$CHECK" = 1 ]; then
     echo "▸ running test + lint gate…"
@@ -98,7 +83,6 @@ if [ "$PREPARE" = 1 ]; then
   exit 0
 fi
 
-# --- upload to R2 via the Worker ----------------------------------------------------------------------
 echo "▸ uploading APK to $BASE/v1/apk …"
 UP=$(curl -sS -o /dev/null -w "%{http_code}" -X PUT \
   "$BASE/v1/admin/apk?versionCode=$NEW_CODE&versionName=$NEW_NAME" \
@@ -111,7 +95,6 @@ if [ "$UP" = "503" ]; then
 fi
 [ "$UP" = "200" ] || { echo "✗ upload failed (HTTP $UP)"; exit 1; }
 
-# --- advertise the new build --------------------------------------------------------------------------
 echo "▸ advertising latest build (force=$FORCE) …"
 PATCH="{\"updateUrl\":\"$BASE/v1/apk\",\"latestVersionCode\":$NEW_CODE,\"latestVersionName\":\"$NEW_NAME\""
 [ "$FORCE" = 1 ] && PATCH="$PATCH,\"minSupportedVersionCode\":$NEW_CODE"

@@ -8,7 +8,6 @@ data class DateRangeSelection(
     val end: LocalDate? = null,
 )
 
-// Tap once to open a range, again to close it. A tap before the start, or on a closed range, starts over.
 fun DateRangeSelection.toggle(date: LocalDate): DateRangeSelection =
     when {
         start == null || end != null -> DateRangeSelection(date)
@@ -21,7 +20,7 @@ fun DateRangeSelection.covers(date: LocalDate): Boolean {
     return date in from..(end ?: from)
 }
 
-// Monday-first month grid, padded with nulls to whole weeks.
+// Monday-first grid, padded with nulls to whole weeks.
 fun calendarWeeks(month: YearMonth): List<List<LocalDate?>> {
     val cells =
         buildList<LocalDate?> {

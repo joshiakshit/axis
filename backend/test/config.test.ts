@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Env, applyPatch, defaultConfig, parseStored, weakEtag } from "../src/config";
 
-// A minimal Env; the KV binding is unused by the pure helpers under test.
 const env = { DEFAULT_APP_VERSION: "3.0.9", DEFAULT_TENANT: "gu" } as unknown as Env;
 
 describe("defaultConfig", () => {

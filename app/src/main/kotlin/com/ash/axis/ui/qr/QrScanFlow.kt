@@ -17,8 +17,7 @@ import kotlinx.coroutines.delay
 
 private enum class CameraAction { Selfie, Qr }
 
-// Gap between tearing down the selfie (front) camera and binding the QR (rear) camera, so the
-// selfie camera's async unbindAll can't unbind the freshly-bound rear camera (black-preview race).
+// Wait for the front camera to unbind before binding the rear camera.
 @Suppress("TopLevelPropertyNaming")
 private const val CAMERA_HANDOFF_DELAY_MS = 350L
 
@@ -44,7 +43,6 @@ internal fun QrScanFlow(
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
 
-    // Mount the scanner only after the selfie camera has had time to fully release.
     LaunchedEffect(pendingScanner) {
         if (pendingScanner) {
             delay(CAMERA_HANDOFF_DELAY_MS)
@@ -96,7 +94,6 @@ internal fun QrScanFlow(
         diagnostics.stage(QrStage.CAMERA_RELEASE)
         showSelfie = false
         showScanner = false
-        // Route through pendingScanner so the front camera fully unbinds before the rear camera binds.
         if (hasPermission(context, Manifest.permission.CAMERA)) pendingScanner = true else requestCamera(CameraAction.Qr)
     }
 

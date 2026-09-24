@@ -23,8 +23,6 @@ class UpdateViewModel
         val config: StateFlow<RemoteConfig> = remoteConfig.state
         val update: StateFlow<UpdateState> = installer.state
 
-        // Manual "check for updates": true while re-fetching remote config, and true once a check has completed
-        // (so the UI can show "up to date" instead of the initial "check" button).
         private val mutableChecking = MutableStateFlow(false)
         val checking: StateFlow<Boolean> = mutableChecking.asStateFlow()
         private val mutableChecked = MutableStateFlow(false)

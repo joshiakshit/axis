@@ -64,7 +64,6 @@ data class PlannerUiState(
     val overallTotal: Int = 0,
     val subjects: ImmutableList<PlannerSubject> = persistentListOf(),
     val timetable: ImmutableMap<String, ImmutableList<TimetableSlot>> = persistentMapOf(),
-    // Real per-date future timetable used to decide which days are selectable in the simulator.
     val dateTimetable: ImmutableMap<LocalDate, ImmutableList<TimetableSlot>> = persistentMapOf(),
     val selectedDates: ImmutableSet<LocalDate> = persistentSetOf(),
     val holidays: ImmutableSet<LocalDate> = persistentSetOf(),
@@ -321,7 +320,6 @@ class PlannerViewModel
             }
         }
 
-        // Extend the date-keyed timetable cache so the grid always has real data for the visible month.
         private suspend fun ensureDateCoverage(end: LocalDate) {
             val range = dateTimetableRange
             if (range == null || end.isAfter(range.second)) {
@@ -517,8 +515,7 @@ class PlannerViewModel
             dateTimetableRange = start to end
         }
 
-        // The timetable endpoint serves one Mon–Sun week per request, so a single wide-range call only
-        // returns one week. Fetch every week that overlaps [start, end] in parallel and merge them.
+        // The endpoint returns one week per request, even for a wider date range.
         private suspend fun fetchDateKeyedRange(
             context: StudentRequestContext,
             start: LocalDate,

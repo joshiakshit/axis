@@ -1,67 +1,40 @@
-// The remote-config contract shared between the Axis app and this Worker.
-//
-// The app fetches this on launch. Two fields carry the whole point of the service:
-//   - `authToken`  : the static iCloudEMS bearer the app sends to authorize OTP/login/refresh.
-//                    If iCloudEMS rotates it, we update KV here and every client picks it up — no APK.
-//   - `appVersion` : the `appversion` string the app sends to iCloudEMS on OTP calls (same rotation risk).
-//
-// `authToken` is optional: when absent the app keeps using its compiled-in BuildConfig token, so the
-// service is purely additive — the app works even if this endpoint is down or unset.
-
 export interface RemoteConfig {
-  /** iCloudEMS static bearer. Omitted when unset (app falls back to its baked-in token). */
+  // Use the compiled-in token when no override is set.
   authToken?: string;
-  /** `appversion` string sent to iCloudEMS on OTP calls. */
+  // iCloudEMS OTP appversion, separate from the Axis app version.
   appVersion: string;
-  /** Force-update floor: the app blocks if its BuildConfig.VERSION_CODE < this. */
+  // Block app versions below this code.
   minSupportedVersionCode: number;
-  /** Newest build available (for a soft "update available" nudge). */
   latestVersionCode: number;
   latestVersionName: string;
-  /** Where to send users to update (store/APK link). */
   updateUrl: string;
-  /** Hard stop: when true the app shows `message` and blocks use. */
   killSwitch: boolean;
-  /** Optional user-facing notice (kill-switch reason, maintenance banner, …). */
   message: string;
-  /** Non-blocking in-app banner shown to everyone until dismissed. Empty = no banner. */
   notice: string;
-  /** Comma-separated admno prefixes that auto-approve on first sight (e.g. "024GUSCSE"). Empty = off. */
+  // Comma-separated admission number prefixes. Blank disables auto-approval.
   autoApprovePrefix: string;
-  /** Stamped server-side on every write. */
   updatedAt: string;
 }
 
-/** Env vars / secrets available to the Worker (declared in wrangler.toml + `wrangler secret put`). */
 export interface Env {
   CONFIG: KVNamespace;
-  /** User-governance store (see migrations/). */
   DB: D1Database;
-  /** Optional APK store for self-hosted one-tap updates. Undefined until an R2 bucket is bound (see README). */
   APK?: R2Bucket;
-  /** Fallback appVersion when KV is empty. */
   DEFAULT_APP_VERSION?: string;
-  /** Default tenant key when `?tenant=` is omitted. */
   DEFAULT_TENANT?: string;
-  /** When "true", new users are auto-approved (rollout only). */
+  // "true" enables auto-approval for new users.
   OPEN_ENROLLMENT?: string;
-  /** Optional secret: seeds `authToken` before anything is written to KV. */
   DEFAULT_AUTH_TOKEN?: string;
-  /** Secret: bearer required to write config. Writes are disabled until this is set. */
   ADMIN_TOKEN?: string;
-  /** Optional secret: when set, GET /v1/config requires a matching `x-axis-key` header. */
   APP_ACCESS_KEY?: string;
-  /** Secret: signs Axis session tokens. Sessions are disabled until this is set. */
   SESSION_SECRET?: string;
-  /** Secret: comma-separated owner admno(s) granted admin + auto-approval. */
+  // Comma-separated owner admission numbers.
   ADMIN_ADMNOS?: string;
-  /** Secret: personal credential for the separate Axis Admin app. */
   ADMIN_APP_TOKEN?: string;
 }
 
 const EPOCH = new Date(0).toISOString();
 
-/** Baseline config used when KV holds nothing yet. */
 export function defaultConfig(env: Env): RemoteConfig {
   const base: RemoteConfig = {
     appVersion: env.DEFAULT_APP_VERSION?.trim() || "3.0.9",
@@ -79,10 +52,6 @@ export function defaultConfig(env: Env): RemoteConfig {
   return seed ? { ...base, authToken: seed } : base;
 }
 
-/**
- * Parse a stored KV value, filling any missing keys from defaults so old records survive schema growth.
- * A corrupt/unparseable value degrades to defaults rather than throwing.
- */
 export function parseStored(raw: string | null, env: Env): RemoteConfig {
   const base = defaultConfig(env);
   if (!raw) return base;
@@ -100,11 +69,7 @@ function isInt(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
-/**
- * Validate an admin-supplied patch and merge it onto `current`. Partial patches are allowed; only the
- * provided keys change. `authToken: null` clears the override. Returns the next config plus any field
- * errors (a non-empty `errors` list means the caller should reject with 400 and not write).
- */
+// Reject patches with errors. null or empty authToken clears the override.
 export function applyPatch(
   current: RemoteConfig,
   patch: unknown,
@@ -135,11 +100,11 @@ export function applyPatch(
     }
   }
   if ("minSupportedVersionCode" in p) {
-    if (isInt(p.minSupportedVersionCode)) next.minSupportedVersionCode = p.minSupportedVersionCode as number;
+    if (isInt(p.minSupportedVersionCode)) next.minSupportedVersionCode = p.minSupportedVersionCode;
     else errors.push("minSupportedVersionCode must be a non-negative integer");
   }
   if ("latestVersionCode" in p) {
-    if (isInt(p.latestVersionCode)) next.latestVersionCode = p.latestVersionCode as number;
+    if (isInt(p.latestVersionCode)) next.latestVersionCode = p.latestVersionCode;
     else errors.push("latestVersionCode must be a non-negative integer");
   }
   if ("latestVersionName" in p) {
@@ -171,10 +136,7 @@ export function applyPatch(
   return { next, errors };
 }
 
-/**
- * Cheap deterministic ETag (FNV-1a over the serialized body). Good enough to power conditional GETs and
- * avoid re-sending an unchanged config; it is not a security primitive.
- */
+// FNV-1a cache tag; not a cryptographic hash.
 export function weakEtag(body: string): string {
   let hash = 0x811c9dc5;
   for (let i = 0; i < body.length; i++) {

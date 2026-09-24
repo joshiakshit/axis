@@ -70,7 +70,6 @@ function req(path: string, init: RequestInit = {}): Request {
   return new Request(`https://axis.test${path}`, init);
 }
 
-/** Log the owner in and return the admin session token the app would hold. */
 async function adminSession(env: Env): Promise<string> {
   const res = await worker.fetch(
     req("/v1/session", { method: "POST", body: JSON.stringify({ token: fakeIcloudToken("21000") }) }),
@@ -103,7 +102,6 @@ describe("POST /v1/session", () => {
     expect(body).toMatchObject({ status: "approved", role: "admin" });
     expect(body.sessionToken).toBeTruthy();
 
-    // Telemetry landed and is visible to the admin list.
     const list = await worker.fetch(
       req("/v1/admin/users", { headers: { authorization: `Bearer ${body.sessionToken}` } }),
       env,
@@ -171,6 +169,71 @@ describe("/v1/admin/config", () => {
   });
 });
 
+describe.each(["/v1/config", "/v1/admin/config"])("PUT %s", (path) => {
+  async function setup() {
+    const env = makeEnv({ ADMIN_TOKEN: "deploy-token" });
+    const token = path === "/v1/config" ? "deploy-token" : await adminSession(env);
+    const headers = { authorization: `bEaReR ${token} ` };
+    return { env, headers };
+  }
+
+  it("merges a tenant patch without changing other tenants", async () => {
+    const { env, headers } = await setup();
+    await env.CONFIG.put("config:gu", JSON.stringify({ notice: "Keep this" }));
+    await env.CONFIG.put("config:other", JSON.stringify({ latestVersionCode: 8, notice: "Old" }));
+
+    const response = await worker.fetch(
+      req(`${path}?tenant=other`, { method: "PUT", headers, body: JSON.stringify({ notice: "New" }) }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ latestVersionCode: 8, notice: "New" });
+    expect(JSON.parse((await env.CONFIG.get("config:other"))!)).toMatchObject({ latestVersionCode: 8, notice: "New" });
+    expect(JSON.parse((await env.CONFIG.get("config:gu"))!)).toEqual({ notice: "Keep this" });
+  });
+
+  it.each([
+    ["malformed JSON", "{", 400, "body must be valid JSON"],
+    ["an oversized body", JSON.stringify({ notice: "é".repeat(8192) }), 413, "config body too large"],
+    ["an invalid patch", JSON.stringify({ latestVersionCode: -1 }), 400, "validation failed"],
+    ["a null patch", "null", 400, "validation failed"],
+  ])("rejects %s without writing config", async (_, body, status, message) => {
+    const { env, headers } = await setup();
+    const stored = JSON.stringify({ notice: "Keep this" });
+    await env.CONFIG.put("config:gu", stored);
+
+    const response = await worker.fetch(req(path, { method: "PUT", headers, body }), env);
+
+    expect(response.status).toBe(status);
+    expect(await response.json()).toMatchObject({ error: message });
+    expect(await env.CONFIG.get("config:gu")).toBe(stored);
+  });
+
+  it("treats an empty body as an empty patch", async () => {
+    const { env, headers } = await setup();
+    await env.CONFIG.put("config:gu", JSON.stringify({ notice: "Keep this" }));
+
+    const response = await worker.fetch(req(path, { method: "PUT", headers }), env);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ notice: "Keep this" });
+  });
+
+  it("requires the route's own credential before parsing the body", async () => {
+    const env = makeEnv({ ADMIN_TOKEN: "deploy-token" });
+    const token = path === "/v1/config" ? await adminSession(env) : "deploy-token";
+
+    const response = await worker.fetch(
+      req(path, { method: "PUT", headers: { authorization: `Bearer ${token}` }, body: "{" }),
+      env,
+    );
+
+    expect(response.status).toBe(401);
+    expect(await env.CONFIG.get("config:gu")).toBeNull();
+  });
+});
+
 describe("/v1/apk", () => {
   it("503s when no R2 bucket is bound", async () => {
     const res = await worker.fetch(req("/v1/apk"), makeEnv());
@@ -203,12 +266,10 @@ describe("/v1/admin actions", () => {
     const env = makeEnv();
     const token = await adminSession(env);
     const auth = { authorization: `Bearer ${token}` };
-    // A pending user shows up, gets banned.
     await worker.fetch(req("/v1/session", { method: "POST", body: JSON.stringify({ token: fakeIcloudToken("30001") }) }), env);
     const ban = await worker.fetch(req("/v1/admin/users/30001/ban", { method: "POST", headers: auth }), env);
     expect(((await ban.json()) as { status: string }).status).toBe("banned");
 
-    // A second pending user, then approve-all (bans are untouched).
     await worker.fetch(req("/v1/session", { method: "POST", body: JSON.stringify({ token: fakeIcloudToken("30002") }) }), env);
     const all = await worker.fetch(req("/v1/admin/approve-all", { method: "POST", headers: auth }), env);
     expect(((await all.json()) as { approved: number }).approved).toBe(1);

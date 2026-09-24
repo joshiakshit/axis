@@ -67,8 +67,7 @@ class MainActivity : FragmentActivity() {
         splashScreen.setKeepOnScreenCondition { startup == null }
         val startupJob =
             lifecycleScope.launch {
-                // Load the last-known remote config from disk before first use so a rotated token/appversion is
-                // already in effect, then refresh from the backend in the background (no-op when disabled).
+                // Load cached overrides before the first request, then refresh in the background.
                 withContext(Dispatchers.IO) {
                     remoteConfig.hydrate()
                     axisSession.hydrate()
@@ -98,7 +97,6 @@ class MainActivity : FragmentActivity() {
         setContent {
             val startupData = startup ?: return@setContent
             val qrScanRequest by qrScanRequests.collectAsStateWithLifecycle()
-            // Play the branded splash once per cold start, but skip it when the user tapped the QR shortcut.
             var splashDone by rememberSaveable { mutableStateOf(launchedForScan) }
             val themeModeStr by preferencesStore
                 .getString("theme_mode", ThemeMode.DARK.name)
@@ -117,8 +115,7 @@ class MainActivity : FragmentActivity() {
                     accentHex = accentColor,
                 )
 
-            // enableEdgeToEdge() defaults to the system night setting, so a Light app on a Dark phone
-            // drew white status bar icons onto a light background. Follow the app's own theme instead.
+            // Status bar icons must follow the app theme, which can differ from the system theme.
             val darkTheme =
                 when (themeState.mode) {
                     ThemeMode.DARK -> true

@@ -17,7 +17,6 @@ class SessionViewModel
 
         fun canAddAccount(): Boolean = accountManager.canAddAccount()
 
-        /** Re-read accounts from storage (after a login adds/activates one). */
         fun refresh() = accountManager.refresh()
 
         fun switchTo(admno: String) {

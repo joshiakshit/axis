@@ -2,10 +2,6 @@ package com.ash.core.util
 
 import java.time.Duration
 import java.time.Instant
-import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 object DateUtils {
     fun relativeTime(epochMillis: Long): String {
@@ -18,12 +14,4 @@ object DateUtils {
             else -> "${minutes / 1440}d ago"
         }
     }
-
-    fun formatDate(
-        date: LocalDate,
-        pattern: String = "dd MMM yyyy",
-    ): String = date.format(DateTimeFormatter.ofPattern(pattern))
-
-    fun epochMillisToLocalDateTime(epochMillis: Long): LocalDateTime =
-        LocalDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), ZoneId.systemDefault())
 }

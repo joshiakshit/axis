@@ -11,9 +11,7 @@ import android.util.Log
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
-// Receives the PackageInstaller commit result. The one step that matters: when the installer needs the user
-// to confirm (STATUS_PENDING_USER_ACTION), it hands us the system confirm Intent — we must launch it, or the
-// install silently stalls. A failure resets the in-app update state so the user can retry.
+// Launch the confirmation intent for STATUS_PENDING_USER_ACTION or installation stalls.
 @AndroidEntryPoint
 class InstallReceiver : BroadcastReceiver() {
     @Inject
@@ -48,7 +46,7 @@ class InstallReceiver : BroadcastReceiver() {
         private const val TAG = "InstallReceiver"
         private const val ACTION = "com.ash.axis.action.INSTALL_STATUS"
 
-        // A mutable IntentSender targeting this receiver, keyed by session so concurrent commits don't collide.
+        // Use a mutable intent for installer extras and a session ID to separate callbacks.
         fun statusSender(
             context: Context,
             sessionId: Int,

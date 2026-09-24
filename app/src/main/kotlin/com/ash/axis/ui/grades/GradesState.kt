@@ -42,7 +42,6 @@ data class GradesUiState(
     val selectedPerformanceDivision: String? = null,
     val performanceExams: List<PerformanceOption> = emptyList(),
     val selectedPerformanceExams: List<String> = emptyList(),
-    val performanceExamSelectorExpanded: Boolean = false,
     val showMarksInsights: Boolean = false,
     val courses: List<CourseMarks> = emptyList(),
     val performanceLastUpdated: Long? = null,

@@ -1,5 +1,4 @@
-// In-memory stand-ins for the Cloudflare bindings the Worker uses, matching the exact statements our code
-// issues. Shared by the unit tests (users state machine) and the router integration tests.
+// Match the SQL statements used by the Worker.
 
 import { UserRow } from "../src/users";
 
@@ -113,7 +112,6 @@ class FakeStatement {
   }
 }
 
-/** Minimal KV: only get/put strings, which is all the config store needs. */
 export class FakeKV {
   store = new Map<string, string>();
   async get(key: string): Promise<string | null> {
@@ -124,7 +122,6 @@ export class FakeKV {
   }
 }
 
-/** Build a fake iCloudEMS access token (unsigned; our decode never verifies the signature). */
 export function fakeIcloudToken(admno: string, name = `Name ${admno}`): string {
   const b64 = (o: unknown) =>
     btoa(JSON.stringify(o)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");

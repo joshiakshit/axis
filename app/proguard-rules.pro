@@ -20,8 +20,7 @@
 -dontwarn com.google.errorprone.annotations.Immutable
 -dontwarn com.google.errorprone.annotations.RestrictedApi
 
-# Strip debug/verbose logging from release builds (keeps PII / raw server
-# responses out of logcat on shipped APKs). Log.w/e are retained for crash triage.
+# Keep personal data and raw responses out of release logs. Retain warnings and errors.
 -assumenosideeffects class android.util.Log {
     public static *** d(...);
     public static *** v(...);

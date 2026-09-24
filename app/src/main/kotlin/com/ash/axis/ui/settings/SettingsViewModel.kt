@@ -34,7 +34,6 @@ data class SettingsUiState(
     val userName: String = "",
     val admno: String = "",
     val themeMode: ThemeMode = ThemeMode.DARK,
-    val colorProfile: String = ColorProfiles.Default.name,
     val accentHex: String = "",
     val customAccents: List<String> = emptyList(),
     val threshold: Int = 75,
@@ -71,7 +70,6 @@ class SettingsViewModel
             viewModelScope.launch {
                 val user = authRepository.getUserInfo()
                 val themeStr = preferencesStore.getString("theme_mode", ThemeMode.DARK.name).first()
-                val profile = preferencesStore.getString("color_profile", ColorProfiles.Default.name).first()
                 val accentHex = preferencesStore.getString("accent_color", "").first()
                 val customAccents = parseCustomAccents(preferencesStore.getString("accent_customs", "").first())
                 val threshold = preferencesStore.getUserInt("attendance_threshold", 75).first()
@@ -95,7 +93,6 @@ class SettingsViewModel
                         userName = user?.name ?: "",
                         admno = user?.admno ?: "",
                         themeMode = ThemeMode.entries.find { m -> m.name == themeStr } ?: ThemeMode.DARK,
-                        colorProfile = profile,
                         accentHex = accentHex,
                         customAccents = customAccents,
                         threshold = threshold,
@@ -116,15 +113,6 @@ class SettingsViewModel
             }
         }
 
-        fun setColorProfile(name: String) {
-            viewModelScope.launch {
-                preferencesStore.putString("color_profile", name)
-                _state.update { it.copy(colorProfile = name) }
-            }
-        }
-
-        // Apply an accent. Blank clears the override (back to the hand-tuned default). A valid custom hex
-        // (not one of the built-in presets) is remembered for quick re-picking.
         fun setAccent(hex: String) {
             val normalized = hex.trim().removePrefix("#").uppercase()
             if (normalized.isNotEmpty() && ColorProfiles.parseAccent(normalized) == null) return
@@ -157,8 +145,6 @@ class SettingsViewModel
             if (_state.value.exportMessage != null) _state.update { it.copy(exportMessage = null) }
         }
 
-        // Generate a PDF and drop it straight into the phone's Downloads (falling back to sharing on very
-        // old Android versions that can't write there without a permission prompt).
         @Suppress("TooGenericExceptionCaught")
         private fun runDownload(block: suspend () -> ExportFile) {
             if (_state.value.isExporting) return

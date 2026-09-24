@@ -21,8 +21,7 @@ object SecureHttpClient {
     }
 }
 
-// Session-scoped cookie store so the PHPSESSID set by the first corecampus call is carried on later ones,
-// matching the official app. Auth is still the Bearer token; the session cookie is supplementary.
+// Carry PHPSESSID across corecampus requests, as the official app does.
 private class InMemoryCookieJar : CookieJar {
     private val store = mutableMapOf<String, MutableMap<String, Cookie>>()
 

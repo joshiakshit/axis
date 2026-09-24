@@ -68,7 +68,7 @@ internal fun TimetableDayPager(
         val isLoading = weekStart in loadingWeeks
         val isFailed = weekStart in failedWeeks
 
-        // Fetch on demand as pages compose (covers swipe-ahead beyond what the ViewModel prefetched).
+        // Swiping can reach dates beyond the prefetched weeks.
         LaunchedEffect(weekStart, isLoaded, isLoading, isFailed) {
             if (!isLoaded && !isLoading && !isFailed) onNeedWeek(date)
         }

@@ -2,8 +2,7 @@ package com.ash.axis.data.session
 
 import kotlinx.serialization.Serializable
 
-// POST /v1/session body. `token` is the active iCloudEMS access token; the rest is best-effort telemetry the
-// backend stores for the admin dashboard (which build/device each user runs, how active they are).
+// token is the active iCloudEMS access token.
 @Serializable
 data class SessionRequest(
     val token: String,
@@ -14,7 +13,6 @@ data class SessionRequest(
     val deviceId: String = "",
 )
 
-// A single usage counter to bump, e.g. name = "qr_scan".
 @Serializable
 data class UsageEvent(
     val name: String,
@@ -26,7 +24,6 @@ data class EventsRequest(
     val events: List<UsageEvent>,
 )
 
-// Response of POST /v1/session. `status`/`role` mirror the backend; defaults keep a partial/absent response usable.
 @Serializable
 data class AxisSession(
     val status: String = STATUS_UNKNOWN,

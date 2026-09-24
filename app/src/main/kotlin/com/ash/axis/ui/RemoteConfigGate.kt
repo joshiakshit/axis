@@ -25,9 +25,6 @@ import com.ash.axis.data.config.RemoteConfigRepository
 import com.ash.axis.ui.update.UpdateButton
 import kotlinx.coroutines.launch
 
-// The backend's safety valve. Reacts to remote config: a kill-switch or a version floor above this build
-// blocks the app with a message; otherwise the real content shows. When remote config is disabled/absent
-// the config stays at its defaults, so this always falls through to `content`.
 @Composable
 fun RemoteConfigGate(
     remoteConfig: RemoteConfigRepository,

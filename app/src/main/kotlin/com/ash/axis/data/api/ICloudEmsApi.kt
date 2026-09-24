@@ -1,11 +1,9 @@
 package com.ash.axis.data.api
 
-import kotlinx.serialization.json.JsonObject
 import okhttp3.RequestBody
 import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.Body
-import retrofit2.http.Headers
 import retrofit2.http.POST
 
 interface ICloudEmsApi {
@@ -42,15 +40,5 @@ interface ICloudEmsApi {
     @POST("corecampus/student/grades/new/save/admitCardController.php")
     suspend fun postAdmitCard(
         @Body body: RequestBody,
-    ): Response<ResponseBody>
-
-    @Headers(
-        "Content-Type: application/json",
-        "Accept: application/json",
-        "Referer: gustudentapp.icloudems.com",
-    )
-    @POST("api/main.php")
-    suspend fun postApiMain(
-        @Body body: JsonObject,
     ): Response<ResponseBody>
 }

@@ -1,15 +1,4 @@
-// Axis backend — v1: remote config.
-//
-// Routes:
-//   GET  /healthz         → liveness probe
-//   GET  /v1/config       → the RemoteConfig for a tenant (ETag + conditional GET). Soft-gated by
-//                           `x-axis-key` only when APP_ACCESS_KEY is set.
-//   PUT  /v1/config       → merge a partial config and persist it. Requires `Authorization: Bearer <ADMIN_TOKEN>`.
-//
-// Config is stored one KV record per tenant under `config:<tenant>`; `?tenant=` selects it (defaults to
-// DEFAULT_TENANT / "gu"). Everything else 404s.
-
-import { Env, RemoteConfig, applyPatch, defaultConfig, parseStored, weakEtag } from "./config";
+import { Env, RemoteConfig, applyPatch, parseStored, weakEtag } from "./config";
 import { decodeIcloudToken, signSession, verifySession } from "./session";
 import {
   SessionMeta,
@@ -25,9 +14,9 @@ import {
 } from "./users";
 
 const MAX_BODY_BYTES = 16 * 1024;
-const MAX_APK_BYTES = 150 * 1024 * 1024; // room for a fat universal APK
+const MAX_APK_BYTES = 150 * 1024 * 1024;
 const APK_KEY = "release/latest.apk";
-const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days; user access is re-checked on each app launch anyway.
+const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 const CORS_HEADERS: Record<string, string> = {
   "access-control-allow-origin": "*",
@@ -47,12 +36,11 @@ function error(status: number, message: string): Response {
   return json({ error: message }, { status });
 }
 
-/** Length-independent constant-time string compare, to keep the admin token check off timing oracles. */
 function timingSafeEqual(a: string, b: string): boolean {
   const enc = new TextEncoder();
   const ab = enc.encode(a);
   const bb = enc.encode(b);
-  // Compare against a fixed-length buffer so length differences don't short-circuit.
+  // Compare all bytes even when lengths differ.
   const len = Math.max(ab.length, bb.length);
   let diff = ab.length ^ bb.length;
   for (let i = 0; i < len; i++) diff |= (ab[i] ?? 0) ^ (bb[i] ?? 0);
@@ -73,15 +61,19 @@ async function readConfig(env: Env, key: string): Promise<RemoteConfig> {
 }
 
 function requireAppKey(request: Request, env: Env): Response | null {
-  if (!env.APP_ACCESS_KEY) return null; // gate disabled
+  if (!env.APP_ACCESS_KEY) return null;
   const provided = request.headers.get("x-axis-key") ?? "";
   return timingSafeEqual(provided, env.APP_ACCESS_KEY) ? null : error(401, "invalid or missing x-axis-key");
 }
 
+function bearerToken(request: Request): string {
+  const header = request.headers.get("authorization") ?? "";
+  return header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+}
+
 function requireAdmin(request: Request, env: Env): Response | null {
   if (!env.ADMIN_TOKEN) return error(503, "writes are disabled: ADMIN_TOKEN is not configured");
-  const header = request.headers.get("authorization") ?? "";
-  const token = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+  const token = bearerToken(request);
   return token && timingSafeEqual(token, env.ADMIN_TOKEN) ? null : error(401, "invalid admin credentials");
 }
 
@@ -113,7 +105,10 @@ async function handleGetConfig(request: Request, env: Env, url: URL): Promise<Re
 async function handlePutConfig(request: Request, env: Env, url: URL): Promise<Response> {
   const denied = requireAdmin(request, env);
   if (denied) return denied;
+  return updateConfig(request, env, url);
+}
 
+async function updateConfig(request: Request, env: Env, url: URL): Promise<Response> {
   const buf = await request.arrayBuffer();
   if (buf.byteLength > MAX_BODY_BYTES) return error(413, "config body too large");
 
@@ -133,9 +128,6 @@ async function handlePutConfig(request: Request, env: Env, url: URL): Promise<Re
   return json(next, { status: 200 });
 }
 
-// ---- User governance (Axis sessions + admin) ---------------------------------------------------------
-
-/** Pull the optional per-launch telemetry out of a session body (all fields best-effort). */
 function parseMeta(body: unknown): SessionMeta {
   const b = (body ?? {}) as Record<string, unknown>;
   const str = (v: unknown): string => (typeof v === "string" ? v.slice(0, 120) : "");
@@ -149,7 +141,6 @@ function parseMeta(body: unknown): SessionMeta {
   };
 }
 
-/** True when `admno` starts with any of the comma-separated prefixes (auto-approval rule). */
 function matchesAutoApprove(admno: string, prefixes: string): boolean {
   return prefixes
     .split(",")
@@ -171,9 +162,7 @@ async function handleSession(request: Request, env: Env, url: URL): Promise<Resp
   }
   const raw = (body as { token?: unknown })?.token;
   const claims = typeof raw === "string" ? decodeIcloudToken(raw) : null;
-  // Light validation: we only need the `admno` claim to identify the user. We deliberately do NOT reject on
-  // token expiry — the app may hold a still-usable-but-expired access token, and an expired token still
-  // proves which admno once authenticated. (Signature isn't verified either; hardenable later.)
+  // iCloudEMS signatures and expiry are not checked here.
   if (!claims) return error(401, "invalid iCloudEMS token");
 
   const admins = (env.ADMIN_ADMNOS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -192,8 +181,7 @@ async function handleSession(request: Request, env: Env, url: URL): Promise<Resp
 
 async function handleAdminDeviceSession(request: Request, env: Env): Promise<Response> {
   if (!env.SESSION_SECRET || !env.ADMIN_APP_TOKEN) return error(503, "admin device sessions are not configured");
-  const header = request.headers.get("authorization") ?? "";
-  const credential = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+  const credential = bearerToken(request);
   if (!credential || !timingSafeEqual(credential, env.ADMIN_APP_TOKEN)) return error(401, "invalid device credential");
 
   const admnos = (env.ADMIN_ADMNOS ?? "").split(",").map((admno) => admno.trim()).filter(Boolean);
@@ -209,11 +197,10 @@ async function handleAdminDeviceSession(request: Request, env: Env): Promise<Res
 
 async function requireAdminSession(request: Request, env: Env): Promise<Response | null> {
   if (!env.SESSION_SECRET) return error(503, "sessions are disabled: SESSION_SECRET is not configured");
-  const header = request.headers.get("authorization") ?? "";
-  const token = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+  const token = bearerToken(request);
   const claims = token ? await verifySession(token, env.SESSION_SECRET) : null;
   if (!claims || claims.role !== "admin") return error(401, "admin session required");
-  // Defense in depth: the caller must still be an admin in the store.
+  // Check the stored role in case admin access was revoked after token issuance.
   const user = await getUser(env, claims.admno);
   if (!user || user.role !== "admin") return error(403, "not an admin");
   return null;
@@ -231,7 +218,6 @@ async function handleUserAction(request: Request, env: Env, admno: string, actio
   const denied = await requireAdminSession(request, env);
   if (denied) return denied;
   if (action !== "allow") {
-    // Admins can't be kicked or banned.
     const target = await getUser(env, admno);
     if (target?.role === "admin") return error(403, `cannot ${action} an admin`);
   }
@@ -264,7 +250,6 @@ async function handleHealth(request: Request, env: Env): Promise<Response> {
   });
 }
 
-/** Sanitize a client-reported usage batch: alnum/underscore names, bounded counts, capped length. */
 function parseEvents(body: unknown): Array<{ name: string; count: number }> {
   const raw = (body as { events?: unknown })?.events;
   if (!Array.isArray(raw)) return [];
@@ -283,9 +268,7 @@ function parseEvents(body: unknown): Array<{ name: string; count: number }> {
 
 async function handleEvents(request: Request, env: Env): Promise<Response> {
   if (!env.SESSION_SECRET) return error(503, "sessions are disabled: SESSION_SECRET is not configured");
-  // Any valid Axis session (user or admin) may report its own usage.
-  const header = request.headers.get("authorization") ?? "";
-  const token = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+  const token = bearerToken(request);
   const claims = token ? await verifySession(token, env.SESSION_SECRET) : null;
   if (!claims) return error(401, "session required");
 
@@ -302,12 +285,6 @@ async function handleEvents(request: Request, env: Env): Promise<Response> {
   return json({ ok: true, counted: events.length });
 }
 
-// ---- Admin config (remote config edited from the app's Admin page) ------------------------------------
-//
-// The app admin sets the force-update floor, the "latest build" fields, kill-switch, etc. from their phone.
-// These reuse the same KV-backed RemoteConfig as /v1/config, but are gated by an *admin session* (role=admin)
-// rather than the deploy-time ADMIN_TOKEN.
-
 async function handleAdminGetConfig(request: Request, env: Env, url: URL): Promise<Response> {
   const denied = await requireAdminSession(request, env);
   if (denied) return denied;
@@ -317,32 +294,12 @@ async function handleAdminGetConfig(request: Request, env: Env, url: URL): Promi
 async function handleAdminPutConfig(request: Request, env: Env, url: URL): Promise<Response> {
   const denied = await requireAdminSession(request, env);
   if (denied) return denied;
-
-  const buf = await request.arrayBuffer();
-  if (buf.byteLength > MAX_BODY_BYTES) return error(413, "config body too large");
-  let patch: unknown;
-  try {
-    patch = JSON.parse(new TextDecoder().decode(buf) || "{}");
-  } catch {
-    return error(400, "body must be valid JSON");
-  }
-  const key = tenantKey(url, env);
-  const { next, errors } = applyPatch(await readConfig(env, key), patch);
-  if (errors.length > 0) return json({ error: "validation failed", details: errors }, { status: 400 });
-  await env.CONFIG.put(key, JSON.stringify(next));
-  return json(next, { status: 200 });
+  return updateConfig(request, env, url);
 }
 
-// ---- APK hosting (optional, self-hosted one-tap updates) ---------------------------------------------
-//
-// Turnkey delivery on the same Worker: the release APK lives in an R2 bucket bound as `APK`. GET streams it
-// to the in-app updater; PUT (admin session or ADMIN_TOKEN, for CI) replaces it. Inert until R2 is bound —
-// every route 503s so the Worker still deploys without a bucket, and any external URL works instead.
-
-/** Admin gate that also accepts the deploy-time ADMIN_TOKEN, so CI can upload without an iCloudEMS login. */
+// Allow the deploy token for CI uploads without an app session.
 async function requireAdminAny(request: Request, env: Env): Promise<Response | null> {
-  const header = request.headers.get("authorization") ?? "";
-  const token = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+  const token = bearerToken(request);
   if (env.ADMIN_TOKEN && token && timingSafeEqual(token, env.ADMIN_TOKEN)) return null;
   return requireAdminSession(request, env);
 }
@@ -436,6 +393,3 @@ export default {
     return error(404, "not found");
   },
 } satisfies ExportedHandler<Env>;
-
-// Re-exported so the toolchain and tests can reach the pure helpers without importing internals directly.
-export { defaultConfig };

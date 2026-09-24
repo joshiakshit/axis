@@ -2,25 +2,21 @@ package com.ash.axis.data.config
 
 import kotlinx.serialization.Serializable
 
-// Mirror of the Axis backend's GET /v1/config contract. Every field has a default so a partial or absent
-// response still yields a usable config, and a disabled/unreachable backend leaves behaviour unchanged.
 @Serializable
 data class RemoteConfig(
-    // iCloudEMS static bearer. Null/blank -> the app keeps using its compiled-in BuildConfig token.
+    // Use the compiled-in token when no override is set.
     val authToken: String? = null,
-    // `appversion` string sent to iCloudEMS on OTP calls.
+    // iCloudEMS OTP appversion, separate from the Axis app version.
     val appVersion: String = DEFAULT_APP_VERSION,
-    // Force-update floor: the app blocks when its BuildConfig.VERSION_CODE is below this.
+    // Block app versions below this code.
     val minSupportedVersionCode: Int = 1,
     val latestVersionCode: Int = 1,
     val latestVersionName: String = "",
     val updateUrl: String = "",
-    // Hard stop: when true the app shows `message` and blocks use.
     val killSwitch: Boolean = false,
     val message: String = "",
-    // Non-blocking in-app banner shown until dismissed. Blank = no banner.
     val notice: String = "",
-    // Comma-separated admno prefixes that auto-approve on first sight. Blank = off.
+    // Comma-separated admission number prefixes. Blank disables auto-approval.
     val autoApprovePrefix: String = "",
     val updatedAt: String = "",
 ) {

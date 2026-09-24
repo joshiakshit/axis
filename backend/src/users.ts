@@ -1,13 +1,8 @@
-// D1-backed user registry. One row per admno; the governance state machine lives here.
-
 import { Env } from "./config";
 import { IcloudClaims, UserRole } from "./session";
 
-// pending → waiting for approval. approved → in. banned → hard block that survives re-login (unlike a kick,
-// which drops back to pending).
 export type UserStatus = "pending" | "approved" | "banned";
 
-// Per-launch telemetry the app reports with each session, surfaced in the admin dashboard.
 export interface SessionMeta {
   appVersionName: string;
   appVersionCode: number;
@@ -51,16 +46,10 @@ export async function getUser(env: Env, admno: string): Promise<UserRow | null> 
 }
 
 export async function listUsers(env: Env): Promise<UserRow[]> {
-  // Pending first (so onboarding requests surface at the top), then most-recently-seen.
   const res = await env.DB.prepare(`${SELECT} ORDER BY (status = 'pending') DESC, last_seen_at DESC`).all<UserRow>();
   return res.results ?? [];
 }
 
-/**
- * Record a session for `claims`: create the row on first sight (pending, unless the caller is an owner or
- * auto-approval applies), refresh name/email + last_seen + telemetry otherwise. Owner admnos are always forced
- * to admin + approved. A `banned` user stays banned across re-logins. `session_count` counts launches.
- */
 export async function upsertOnSession(
   env: Env,
   claims: IcloudClaims,
@@ -117,13 +106,13 @@ export async function upsertOnSession(
   }
 
   const role: UserRole = isAdmin ? "admin" : existing.role;
-  // Owners force to approved; everyone else keeps their status (banned survives re-login).
+  // Only owner status overrides a ban on login.
   const status: UserStatus = isAdmin ? "approved" : existing.status;
   const name = claims.name || existing.name;
   const email = claims.email || existing.email;
   const firstSeen = existing.first_seen_at || existing.created_at || now;
   const approvedAt = status === "approved" && !existing.approved_at ? now : existing.approved_at;
-  // Keep the latest non-empty telemetry so a partial/older client can't erase what we know.
+  // Older clients may omit telemetry; preserve stored values.
   const appVersionName = meta.appVersionName || existing.app_version_name;
   const appVersionCode = meta.appVersionCode || existing.app_version_code;
   const deviceModel = meta.deviceModel || existing.device_model;
@@ -179,14 +168,11 @@ export async function setStatus(env: Env, admno: string, status: UserStatus): Pr
   return { ...existing, status, approved_at: approvedAt };
 }
 
-/** Approve every pending user at once. Returns how many were flipped. */
 export async function approveAllPending(env: Env): Promise<number> {
   const pending = (await listUsers(env)).filter((u) => u.status === "pending");
   for (const u of pending) await setStatus(env, u.admno, "approved");
   return pending.length;
 }
-
-// ---- Usage metrics (aggregate counters) ---------------------------------------------------------------
 
 export async function bumpMetrics(env: Env, events: Array<{ name: string; count: number }>): Promise<void> {
   for (const e of events) {

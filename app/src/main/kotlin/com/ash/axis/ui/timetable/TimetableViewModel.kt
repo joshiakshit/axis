@@ -64,16 +64,14 @@ data class TimetableDay(
 data class TimetableUiState(
     val isLoading: Boolean = true,
     val error: String? = null,
-    // Page 0 of the continuous day pager maps to this date; captured once at init so the UI and
-    // ViewModel agree on the page<->date mapping for the whole session.
+    // Keep the page-to-date mapping fixed for the session.
     val anchorDate: LocalDate = LocalDate.now(),
-    // The day currently in view; drives the header label and which week gets fetched.
     val currentDate: LocalDate = LocalDate.now(),
     val dayCache: ImmutableMap<LocalDate, TimetableDay> = persistentMapOf(),
     val loadedWeeks: ImmutableSet<LocalDate> = persistentSetOf(),
     val loadingWeeks: ImmutableSet<LocalDate> = persistentSetOf(),
     val failedWeeks: ImmutableSet<LocalDate> = persistentSetOf(),
-    // One-shot scroll request: the pager animates/jumps here, then calls consumeJump().
+    // The pager clears this request with consumeJump() after scrolling.
     val jumpTarget: LocalDate? = null,
     val isRefreshing: Boolean = false,
     val isOffline: Boolean = false,
@@ -100,7 +98,7 @@ class TimetableViewModel
 
         private val dayOrder = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
-        // Raw (unprocessed) slots per week, kept so the progress ticker can rebuild today's "LIVE" bars.
+        // Keep raw slots so the ticker can update today's progress.
         private val rawByWeek = mutableMapOf<LocalDate, Map<String, List<TimetableSlot>>>()
         private var calendarJob: Job? = null
         private var calendarMonth: LocalDate? = null
@@ -123,10 +121,6 @@ class TimetableViewModel
             }
         }
 
-        // --- Public actions driven by the UI -------------------------------------------------
-
-        // The pager settled on [date]: relabel the header and make sure its week (plus the immediate
-        // neighbours, so crossing a week boundary is instant) is loaded.
         fun onDateShown(date: LocalDate) {
             if (_state.value.currentDate != date) _state.update { it.copy(currentDate = date) }
             loadCalendar()
@@ -136,7 +130,6 @@ class TimetableViewModel
             ensureWeek(date.minusDays(1))
         }
 
-        // Teleport to any date (date picker / Today button / day-strip tap).
         fun jumpTo(date: LocalDate) {
             _state.update { it.copy(currentDate = date, jumpTarget = date) }
             loadCalendar()
@@ -144,7 +137,6 @@ class TimetableViewModel
             ensureWeek(date)
         }
 
-        // Mirror the viewed date so "Export timetable" in Settings targets the week the user is looking at.
         private fun persistViewDate(date: LocalDate) {
             viewModelScope.launch { preferencesStore.putUserString(ExportKeys.TIMETABLE_VIEW_DATE, date.toString()) }
         }
@@ -181,8 +173,6 @@ class TimetableViewModel
             }
         }
 
-        // --- Week loading --------------------------------------------------------------------
-
         private fun ensureWeekInternal(
             date: LocalDate,
             forceRefresh: Boolean,
@@ -194,7 +184,7 @@ class TimetableViewModel
                 if (isInitial) _state.update { it.copy(isLoading = false) }
                 return
             }
-            // Reserve the week synchronously so concurrent callers (neighbour prefetch) don't double-fetch.
+            // Reserve synchronously to prevent duplicate prefetches.
             _state.update {
                 it.copy(
                     loadingWeeks = (it.loadingWeeks + ws).toImmutableSet(),

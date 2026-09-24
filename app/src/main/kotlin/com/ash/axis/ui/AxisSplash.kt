@@ -24,15 +24,12 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 
-// Reproduces the source CSS stroke-draw: the caret traces itself from the bottom-left leg, up to the
-// apex, and down to the bottom-right leg, holds briefly, then fades out and hands off to the app.
 @Composable
 fun AxisSplash(onFinished: () -> Unit) {
     val progress = remember { Animatable(0f) }
     val fade = remember { Animatable(1f) }
 
     LaunchedEffect(Unit) {
-        // ~0.85s ease-in-out draw, a short hold on the finished mark, then a quick fade into the app.
         progress.animateTo(1f, tween(durationMillis = 850, easing = FastOutSlowInEasing))
         delay(240L)
         fade.animateTo(0f, tween(durationMillis = 240))
@@ -68,7 +65,6 @@ fun AxisSplash(onFinished: () -> Unit) {
                 drawPath(
                     path = drawn,
                     color = Color.White,
-                    // Stroke width / mark width matches the source CSS (20 / 200).
                     style = Stroke(width = markWidth * 0.10f, cap = StrokeCap.Round, join = StrokeJoin.Round),
                 )
             }

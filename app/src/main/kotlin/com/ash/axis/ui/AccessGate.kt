@@ -24,11 +24,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ash.axis.data.session.AxisSession
 import com.ash.core.security.AccountEntry
 
-// Governance gate. Deliberately *load-first*: the app renders immediately and the access check runs in the
-// background, so governance never adds to startup time. Only an explicit `pending`/`banned` verdict blocks —
-// and even then, any *other* signed-in account can be resumed, so adding a not-yet-approved account never
-// traps the user out of an account that already works. The check re-runs on every resume, so a revoke lands
-// the next time the user foregrounds the app.
+// Render immediately. Only pending or banned accounts block access.
 @Composable
 internal fun AccessGate(
     activeAdmno: String?,
@@ -101,7 +97,6 @@ private fun BlockedAccountScreen(
             onRetry?.let { retry ->
                 TextButton(onClick = retry) { Text("Check again") }
             }
-            // Escape hatch: hop back to any other signed-in account that already works.
             otherAccounts.forEach { account ->
                 TextButton(onClick = { onSwitch(account.admno) }) {
                     Text("Return as ${account.name.ifBlank { account.admno }}")

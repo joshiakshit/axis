@@ -83,7 +83,6 @@ class GradesViewModel
                     selectedPerformanceDivision = null,
                     performanceExams = emptyList(),
                     selectedPerformanceExams = emptyList(),
-                    performanceExamSelectorExpanded = false,
                     courses = emptyList(),
                     performanceError = null,
                 )
@@ -102,7 +101,6 @@ class GradesViewModel
                     selectedPerformanceDivision = null,
                     performanceExams = emptyList(),
                     selectedPerformanceExams = emptyList(),
-                    performanceExamSelectorExpanded = false,
                     courses = emptyList(),
                     performanceError = null,
                 )
@@ -119,7 +117,6 @@ class GradesViewModel
                     selectedPerformanceDivision = null,
                     performanceExams = emptyList(),
                     selectedPerformanceExams = emptyList(),
-                    performanceExamSelectorExpanded = false,
                     courses = emptyList(),
                     performanceError = null,
                 )
@@ -134,7 +131,6 @@ class GradesViewModel
                     selectedPerformanceDivision = division,
                     performanceExams = emptyList(),
                     selectedPerformanceExams = emptyList(),
-                    performanceExamSelectorExpanded = false,
                     courses = emptyList(),
                     performanceError = null,
                 )
@@ -157,10 +153,6 @@ class GradesViewModel
                     performanceError = null,
                 )
             }
-        }
-
-        fun setPerformanceExamSelectorExpanded(expanded: Boolean) {
-            _state.update { it.copy(performanceExamSelectorExpanded = expanded) }
         }
 
         fun applyPerformanceExams() {
@@ -561,7 +553,6 @@ class GradesViewModel
                             selectedPerformanceDivision = selectedDivision,
                             performanceExams = exams,
                             selectedPerformanceExams = emptyList(),
-                            performanceExamSelectorExpanded = false,
                             courses = emptyList(),
                             performanceLastUpdated = System.currentTimeMillis(),
                         )
@@ -696,7 +687,6 @@ class GradesViewModel
                         it.copy(
                             performanceLoading = false,
                             performanceExams = exams,
-                            performanceExamSelectorExpanded = false,
                             performanceError = if (exams.isEmpty()) "No exams found for this division" else null,
                         )
                     }

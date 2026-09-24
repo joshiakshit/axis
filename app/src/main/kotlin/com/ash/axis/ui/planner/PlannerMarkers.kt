@@ -161,7 +161,7 @@ private fun StudentMarkerDialog(
     var type by remember { mutableStateOf(StudentMarkerType.EXAM) }
     var examTitle by remember { mutableStateOf("") }
     var holidayTitle by remember { mutableStateOf("") }
-    // Each tab keeps its own dates, so switching back and forth does not wipe what you already picked.
+    // Keep each tab's selected dates when switching tabs.
     var examDates by remember { mutableStateOf(DateRangeSelection()) }
     var holidayDates by remember { mutableStateOf(DateRangeSelection()) }
 

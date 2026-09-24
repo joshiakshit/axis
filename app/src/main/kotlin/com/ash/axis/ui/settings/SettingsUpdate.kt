@@ -24,8 +24,6 @@ import com.ash.axis.BuildConfig
 import com.ash.axis.ui.update.UpdateButton
 import com.ash.axis.ui.update.UpdateViewModel
 
-// "Check for updates" card: shows the installed version and, on tap, re-fetches remote config. If a newer build
-// is published it turns into the one-tap installer; otherwise it confirms you're up to date.
 @Composable
 internal fun UpdateSettings(viewModel: UpdateViewModel = hiltViewModel()) {
     val config by viewModel.config.collectAsStateWithLifecycle()

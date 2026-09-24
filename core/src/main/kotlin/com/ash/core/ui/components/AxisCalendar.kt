@@ -328,7 +328,6 @@ private fun MonthCell(
     }
 }
 
-// Scrollable dialog body with a pinned footer, so tall content stays reachable on short screens.
 @Composable
 fun AxisDialog(
     onDismiss: () -> Unit,

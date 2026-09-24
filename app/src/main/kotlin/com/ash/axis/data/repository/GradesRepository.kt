@@ -387,7 +387,7 @@ class GradesRepository
             }
         }
 
-        // The PHP backend renames these fields between releases, so accept every spelling we have seen.
+        // Field names vary across PHP backend releases.
         private fun JsonObject.firstString(vararg keys: String): String {
             keys.forEach { key ->
                 (this[key] as? JsonPrimitive)?.contentOrNull?.let { return it }

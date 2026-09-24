@@ -17,6 +17,6 @@ enum class ThemeMode {
 data class ThemeState(
     val mode: ThemeMode = ThemeMode.DARK,
     val profileName: String = ColorProfiles.Default.name,
-    // Optional accent override as an "RRGGBB" hex. Blank/invalid falls back to the profile's own primary.
+    // RRGGBB; blank or invalid values use the profile default.
     val accentHex: String = "",
 )

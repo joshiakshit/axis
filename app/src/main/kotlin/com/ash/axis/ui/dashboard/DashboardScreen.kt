@@ -29,9 +29,6 @@ fun DashboardScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
-    // Re-read the shared cache whenever Home comes back to the foreground, so a refresh done on the Attendance
-    // tab (or a QR mark) shows here instead of a stale snapshot. The ViewModel coalesces this with its initial
-    // load, so the first launch doesn't double-fetch.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.syncFromCache() }
 
     val result: Result<DashboardUiState> =

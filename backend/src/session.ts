@@ -1,12 +1,3 @@
-// Axis session layer.
-//
-// Two jobs:
-//   1. `decodeIcloudToken` — LIGHT validation of the iCloudEMS access token: read the `admno`/name/email out
-//      of the JWT payload and check structure. We do NOT verify iCloudEMS's signature (their HS256 key is not
-//      ours) — this is the accepted v1 trade-off, hardenable later with a server-side iCloudEMS probe.
-//   2. `signSession`/`verifySession` — mint and check OUR OWN short-lived HS256 token (signed with
-//      SESSION_SECRET) that carries `admno` + `role`. This is what authorizes the admin endpoints.
-
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
@@ -49,7 +40,7 @@ function b64urlDecodeString(value: string): string {
   return dec.decode(b64urlDecodeBytes(value));
 }
 
-/** Read the identity claims from an iCloudEMS access token without verifying its signature. */
+// Read iCloudEMS identity claims without checking the signature or expiry.
 export function decodeIcloudToken(token: string): IcloudClaims | null {
   const parts = token.split(".");
   if (parts.length < 2) return null;
@@ -76,7 +67,6 @@ async function hmacKey(secret: string): Promise<CryptoKey> {
   ]);
 }
 
-/** Sign an Axis session token (HS256) carrying admno + role, valid for `ttlSeconds`. */
 export async function signSession(
   admno: string,
   role: UserRole,
@@ -92,7 +82,6 @@ export async function signSession(
   return `${signingInput}.${b64urlEncodeBytes(sig)}`;
 }
 
-/** Verify an Axis session token's signature and expiry; returns its claims or null. */
 export async function verifySession(token: string, secret: string): Promise<SessionClaims | null> {
   const parts = token.split(".");
   if (parts.length !== 3) return null;

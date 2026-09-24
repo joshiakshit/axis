@@ -28,7 +28,7 @@ abstract class AppDatabase : RoomDatabase() {
                 }
             }
 
-        // Markers became exam-only, so the type column is gone. SQLite needs a table rebuild to drop it.
+        // SQLite needs a table rebuild to remove the old marker type column.
         val MIGRATION_2_3 =
             object : Migration(2, 3) {
                 override fun migrate(db: SupportSQLiteDatabase) {

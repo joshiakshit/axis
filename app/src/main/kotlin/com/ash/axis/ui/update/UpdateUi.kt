@@ -30,8 +30,6 @@ import com.ash.axis.data.config.RemoteConfig
 import com.ash.axis.data.update.UpdateStage
 import kotlin.math.roundToInt
 
-// A button that turns into a live progress bar while the APK downloads, then a "starting installer" note when
-// the system takes over. Reused by the forced-update screen and the soft update dialog.
 @Composable
 fun UpdateButton(
     url: String,
@@ -101,7 +99,6 @@ fun UpdateButton(
     }
 }
 
-// A dismissible "update available" prompt for the non-forced case (a newer build exists but this one still works).
 @Composable
 fun UpdateAvailableDialog(
     config: RemoteConfig,

@@ -11,10 +11,7 @@ import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// Aggregate, privacy-safe usage counters (e.g. "qr_scan", "export"). Calls are cheap and non-blocking:
-// `log()` just bumps an in-memory tally and coalesces a flush, which posts the batch through the session
-// repository (which no-ops when governance is disabled or before the user has a session token). Nothing here
-// can throw into a caller — it's telemetry, never on a critical path.
+// Batch counters in memory. Reporting failures must not interrupt the caller.
 @Singleton
 class UsageReporter
     @Inject
@@ -55,7 +52,7 @@ class UsageReporter
         companion object {
             const val FLUSH_DELAY_MS = 3_000L
 
-            // Event names (kept short + stable; the backend sanitizes to [a-z0-9_]).
+            // The backend accepts [a-z0-9_] event names.
             const val QR_SCAN = "qr_scan"
             const val QR_FAIL = "qr_fail"
             const val EXPORT = "export"

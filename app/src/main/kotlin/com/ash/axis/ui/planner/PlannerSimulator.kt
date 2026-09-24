@@ -104,7 +104,6 @@ internal fun SimulatorGrid(
     val monthStart = month.withDayOfMonth(1)
     val monthTitle = remember(monthStart) { monthStart.format(monthTitleFormatter) }
     val weeks = remember(monthStart) { simulatorWeeks(monthStart) }
-    // One pass over the markers here beats filtering the whole list inside all 42 day cells.
     val markersByDate = remember(markers, monthStart) { markerTypesByDate(markers, monthStart) }
 
     Surface(

@@ -45,10 +45,8 @@ import com.ash.core.ui.navigation.AppScaffold
 import com.ash.core.ui.navigation.BottomNavItem
 import com.ash.core.ui.navigation.CoreNavHost
 
-// Main bottom-nav routes whose last selection is remembered as the app's reopen destination.
 private val tabRoutes = setOf("dashboard", "academics", "planner", "grades")
 
-// Full-screen routes pushed on top of the tabs (no bottom bar); they slide in and pop back.
 private val fullScreenRoutes = setOf("settings", "notifications")
 
 @Suppress("LongMethod", "CyclomaticComplexMethod")
@@ -78,10 +76,9 @@ internal fun MainApp(
     val updateConfig by updateViewModel.config.collectAsStateWithLifecycle()
     val completedUpdate by updateViewModel.completedVersion.collectAsStateWithLifecycle()
     var updateDismissed by rememberSaveable { mutableStateOf(false) }
-    // Dismissal is keyed on the notice text, so a *new* admin notice reappears after an old one was dismissed.
+    // A changed notice must appear even if the previous notice was dismissed.
     var dismissedNotice by rememberSaveable { mutableStateOf("") }
 
-    // Remember the last main tab so the app reopens where the user left off.
     LaunchedEffect(currentRoute) {
         val route = currentRoute
         if (route != null && route in tabRoutes) {
@@ -190,7 +187,6 @@ internal fun MainApp(
             diagnostics = qrViewModel.diagnostics,
         )
 
-        // A newer build exists but this one still works — offer a one-tap update, dismissible for the session.
         if (completedUpdate == null && !updateDismissed && updateViewModel.available(updateConfig)) {
             UpdateAvailableDialog(
                 config = updateConfig,
@@ -203,7 +199,6 @@ internal fun MainApp(
             UpdateCompletedDialog(version = version, onDismiss = updateViewModel::dismissCompletedUpdate)
         }
 
-        // Admin-set announcement banner (non-blocking), floating just above the bottom nav.
         val notice = updateConfig.notice
         if (notice.isNotBlank() && notice != dismissedNotice) {
             NoticeBanner(

@@ -1,16 +1,14 @@
 package com.ash.core.ui.theme
 
-import android.os.Build
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 
-// Shared pitch-black dark-mode neutrals. The single accent profile sits on this true-black, de-blued canvas.
-private val DarkBg = Color(0xFF000000) // true black canvas (OLED)
-private val DarkOnBg = Color(0xFFF2F2F4) // near-white text (softened)
-private val DarkSurface = Color(0xFF0C0C0E) // cards: barely-raised near-black
+private val DarkBg = Color(0xFF000000)
+private val DarkOnBg = Color(0xFFF2F2F4)
+private val DarkSurface = Color(0xFF0C0C0E)
 private val DarkSurfaceVariant = Color(0xFF151517)
-private val DarkOnSurfaceVariant = Color(0xFF8A8A90) // neutral gray (de-blued)
-private val DarkOutline = Color(0xFF262628) // hairline neutral border
+private val DarkOnSurfaceVariant = Color(0xFF8A8A90)
+private val DarkOutline = Color(0xFF262628)
 
 data class ColorProfile(
     val name: String,
@@ -33,7 +31,6 @@ data class ColorProfile(
 )
 
 object ColorProfiles {
-    // Single, toned-down accent. Muted steel-blue instead of the old vivid blue — used sparingly on black.
     val Slate =
         ColorProfile(
             name = "slate",
@@ -58,13 +55,9 @@ object ColorProfiles {
 
     const val DYNAMIC_NAME = "dynamic"
 
-    fun isDynamicSupported(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-
     fun byName(name: String): ColorProfile = all.find { it.name == name } ?: Default
 
-    // Built-in accent choices, tuned to read well on true-black OLED — vivid without being neon.
-    // "Slate" carries a blank hex, meaning "use the hand-tuned Default profile as-is"; the others
-    // recolour the shared pitch-black neutrals via [accented].
+    // A blank hex keeps the default profile.
     val accentPresets =
         listOf(
             AccentPreset("Slate", ""),
@@ -77,7 +70,6 @@ object ColorProfiles {
             AccentPreset("Violet", "9B87F5"),
         )
 
-    // Parse "RRGGBB" or "#RRGGBB" (case-insensitive). Returns null for anything malformed.
     fun parseAccent(hex: String): Color? {
         val cleaned = hex.trim().removePrefix("#")
         if (cleaned.length != 6 || cleaned.any { it.digitToIntOrNull(16) == null }) return null
@@ -85,8 +77,6 @@ object ColorProfiles {
         return Color(0xFF000000 or value)
     }
 
-    // Keep the shared pitch-black neutrals but recolour every primary-derived slot from [accent].
-    // The dark/light schemes in AppTheme derive their tints from `primary`, so the accent flows through.
     fun accented(accent: Color): ColorProfile {
         val onAccent = if (accent.luminance() > CONTRAST_SPLIT) Color.Black else Color.White
         return Slate.copy(

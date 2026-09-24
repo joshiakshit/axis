@@ -18,8 +18,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ash.core.ui.theme.AppShapes
 
-// A non-blocking, dismissible banner for an admin-set notice (maintenance heads-up, announcement, …). Floats
-// over content; the caller decides placement and when it's shown.
 @Composable
 fun NoticeBanner(
     text: String,

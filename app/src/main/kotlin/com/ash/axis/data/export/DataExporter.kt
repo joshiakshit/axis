@@ -27,7 +27,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 object ExportKeys {
-    // Key the Timetable tab writes its current view date to, so "export timetable" mirrors the viewed week.
+    // Export the week currently shown in the Timetable tab.
     const val TIMETABLE_VIEW_DATE = "timetable_view_date"
 }
 
@@ -88,8 +88,6 @@ class DataExporter
             end: LocalDate,
         ): String = "${start.format(rangeFormat)} – ${end.format(rangeFormat)}"
 
-        // --- CSV / ICS -----------------------------------------------------------------------
-
         suspend fun exportAttendanceCsv(): ExportFile {
             val (semester, data) = loadAttendance()
             val file = writeTextFile("axis-attendance-${LocalDate.now()}.csv", buildAttendanceCsv(data))
@@ -101,8 +99,6 @@ class DataExporter
             val file = writeTextFile("axis-timetable-$start.ics", buildTimetableIcs(week, start, end))
             return ExportFile(file, "text/calendar", "Timetable — ${weekLabel(start, end)}")
         }
-
-        // --- PDF -----------------------------------------------------------------------------
 
         suspend fun exportAttendancePdf(): ExportFile {
             val (semester, data) = loadAttendance()
@@ -174,8 +170,7 @@ class DataExporter
             return "${slot.fromTime}–${slot.toTime}   $label$room"
         }
 
-        // Copy an already-generated export into the public Downloads collection (Android 10+). Returns
-        // false on older APIs, where the caller falls back to the share sheet.
+        // Return false before Android 10 so the caller can use the share sheet.
         fun saveToDownloads(export: ExportFile): Boolean {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
             val resolver = appContext.contentResolver
@@ -277,8 +272,6 @@ class DataExporter
             content: String,
         ): File = File(exportsDir(), name).apply { writeText(content) }
 
-        // --- formatting helpers --------------------------------------------------------------
-
         private fun parseDate(raw: String): LocalDate? = runCatching { LocalDate.parse(raw) }.getOrNull()
 
         private fun formatPercent(value: Double): String = String.format(java.util.Locale.ENGLISH, "%.2f", value)
@@ -290,7 +283,7 @@ class DataExporter
                 value
             }
 
-        // Build a floating-local ICS timestamp (YYYYMMDDTHHMMSS) from a date and an "HH:mm" string.
+        // ICS uses floating local time: YYYYMMDDTHHMMSS.
         private fun timeStamp(
             date: LocalDate,
             time: String,
@@ -318,7 +311,7 @@ class DataExporter
                 else -> "LEC"
             }
 
-        // Fold a content line to <=75 octets per RFC 5545 (continuation lines start with a space).
+        // RFC 5545 limits content lines to 75 octets, including continuation spaces.
         private fun foldInto(
             builder: StringBuilder,
             line: String,

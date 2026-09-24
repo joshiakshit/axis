@@ -121,8 +121,7 @@ class DashboardViewModel
             loadDashboard(forceRefresh = true)
         }
 
-        // Cheap re-read of the shared attendance/timetable cache — called when Home becomes visible again, so a
-        // refresh done on the Attendance tab (or a QR mark) is reflected here instead of showing a stale snapshot.
+        // Reload shared caches after changes on other screens.
         fun syncFromCache() {
             loadDashboard(forceRefresh = false)
         }
@@ -140,8 +139,7 @@ class DashboardViewModel
 
         @Suppress("LongMethod")
         private fun loadDashboard(forceRefresh: Boolean) {
-            // Coalesce overlapping non-forced loads (e.g. init + first ON_RESUME, or rapid tab switches) so we
-            // don't fire duplicate fetches. A user-initiated pull-to-refresh always runs.
+            // Coalesce background loads; always allow a manual refresh.
             if (!forceRefresh && loadJob?.isActive == true) return
             loadJob =
                 viewModelScope.launch {

@@ -32,8 +32,7 @@ internal fun TimetableContent(
             pageCount = { TimetablePaging.PAGE_COUNT },
         )
 
-    // Report the settled page back so the header relabels and the week is fetched. Using settledPage
-    // (not currentPage) avoids firing a fetch for every intermediate page during a long jump.
+    // Use settledPage to avoid fetching intermediate dates during jumps.
     LaunchedEffect(pagerState, anchor) {
         snapshotSettledPages(pagerState)
             .drop(1)
@@ -41,7 +40,6 @@ internal fun TimetableContent(
             .collect { page -> viewModel.onDateShown(dateForPage(anchor, page)) }
     }
 
-    // Honour a jump request: animate for nearby dates, snap instantly for far teleports.
     LaunchedEffect(data.jumpTarget) {
         val target = data.jumpTarget ?: return@LaunchedEffect
         val page = pageForDate(anchor, target)

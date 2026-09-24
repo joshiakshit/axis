@@ -38,7 +38,7 @@ class DataRefreshSignal
 
             private val counter = AtomicInteger(NO_SOURCE)
 
-            // Ids let a subscriber ignore the event it just emitted, so a refresh does not reload itself.
+            // Event IDs prevent subscribers from reloading after their own refresh.
             fun newSourceId(): Int = counter.incrementAndGet()
         }
     }

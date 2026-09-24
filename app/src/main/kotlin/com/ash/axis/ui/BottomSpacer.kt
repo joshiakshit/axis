@@ -8,7 +8,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.ash.core.ui.theme.AppDimens
 
-// Keeps the last list item clear of the bottom navigation bar.
 @Composable
 fun BottomSpacer(modifier: Modifier = Modifier) {
     Spacer(
