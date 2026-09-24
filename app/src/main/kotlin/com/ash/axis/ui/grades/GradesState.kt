@@ -49,3 +49,74 @@ data class GradesUiState(
     val admitCardLoading: Boolean = false,
     val admitCardError: String? = null,
 )
+
+internal fun GradesUiState.withPerformanceYear(year: String) =
+    copy(
+        selectedPerformanceYear = year,
+        performanceSessions = emptyList(),
+        selectedPerformanceSession = null,
+        performanceClasses = emptyList(),
+        selectedPerformanceClass = null,
+        performanceDivisions = emptyList(),
+        selectedPerformanceDivision = null,
+        performanceExams = emptyList(),
+        selectedPerformanceExams = emptyList(),
+        courses = emptyList(),
+        showMarksInsights = false,
+        performanceError = null,
+    )
+
+internal fun GradesUiState.withPerformanceSession(session: String) =
+    copy(
+        selectedPerformanceSession = session,
+        performanceClasses = emptyList(),
+        selectedPerformanceClass = null,
+        performanceDivisions = emptyList(),
+        selectedPerformanceDivision = null,
+        performanceExams = emptyList(),
+        selectedPerformanceExams = emptyList(),
+        courses = emptyList(),
+        showMarksInsights = false,
+        performanceError = null,
+    )
+
+internal fun GradesUiState.withPerformanceClass(classId: String) =
+    copy(
+        selectedPerformanceClass = classId,
+        performanceDivisions = emptyList(),
+        selectedPerformanceDivision = null,
+        performanceExams = emptyList(),
+        selectedPerformanceExams = emptyList(),
+        courses = emptyList(),
+        showMarksInsights = false,
+        performanceError = null,
+    )
+
+internal fun GradesUiState.withPerformanceDivision(division: String) =
+    copy(
+        selectedPerformanceDivision = division,
+        performanceExams = emptyList(),
+        selectedPerformanceExams = emptyList(),
+        courses = emptyList(),
+        showMarksInsights = false,
+        performanceError = null,
+    )
+
+internal fun GradesUiState.withSemester(semester: String?) =
+    copy(
+        selectedSemesterNum = semester,
+        examSessions = emptyList(),
+        selectedSessionId = null,
+    ).withoutReportCard()
+
+internal fun GradesUiState.withSession(session: String?) = copy(selectedSessionId = session).withoutReportCard()
+
+internal fun GradesUiState.withoutReportCard() =
+    copy(
+        reportCards = emptyList(),
+        pdfFile = null,
+        marksheetType = "",
+        subExamTypeAA = "",
+        classId = "",
+        acadYear = "",
+    )

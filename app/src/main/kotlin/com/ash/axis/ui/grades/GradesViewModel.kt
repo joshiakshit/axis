@@ -14,6 +14,8 @@ import com.ash.axis.domain.usecase.TimetableUseCase
 import com.ash.axis.ui.ErrorText
 import com.ash.core.storage.PreferencesStore
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -37,6 +39,28 @@ class GradesViewModel
     ) : ViewModel() {
         private val _state = MutableStateFlow(GradesUiState())
         val state: StateFlow<GradesUiState> = _state.asStateFlow()
+        private var performanceJob: Job? = null
+        private var resultJob: Job? = null
+        private var pdfJob: Job? = null
+        private var admitJob: Job? = null
+        private var admitGeneration = 0
+        private var performanceGeneration = 0
+        private var resultGeneration = 0
+        private var pdfGeneration = 0
+
+        private fun launchPerformance(block: suspend (Int) -> Unit) {
+            performanceJob?.cancel()
+            val generation = ++performanceGeneration
+            performanceJob = viewModelScope.launch { block(generation) }
+        }
+
+        private fun launchResult(block: suspend (Int) -> Unit) {
+            resultJob?.cancel()
+            pdfJob?.cancel()
+            ++pdfGeneration
+            val generation = ++resultGeneration
+            resultJob = viewModelScope.launch { block(generation) }
+        }
 
         init {
             loadPerformance(forceRefresh = false)
@@ -72,69 +96,25 @@ class GradesViewModel
         }
 
         fun selectPerformanceYear(year: String) {
-            _state.update {
-                it.copy(
-                    selectedPerformanceYear = year,
-                    performanceSessions = emptyList(),
-                    selectedPerformanceSession = null,
-                    performanceClasses = emptyList(),
-                    selectedPerformanceClass = null,
-                    performanceDivisions = emptyList(),
-                    selectedPerformanceDivision = null,
-                    performanceExams = emptyList(),
-                    selectedPerformanceExams = emptyList(),
-                    courses = emptyList(),
-                    performanceError = null,
-                )
-            }
+            _state.update { it.withPerformanceYear(year) }
             viewModelScope.launch { preferencesStore.putUserString(PREF_PERF_YEAR, year) }
             loadPerformanceSessions(year)
         }
 
         fun selectPerformanceSession(session: String) {
-            _state.update {
-                it.copy(
-                    selectedPerformanceSession = session,
-                    performanceClasses = emptyList(),
-                    selectedPerformanceClass = null,
-                    performanceDivisions = emptyList(),
-                    selectedPerformanceDivision = null,
-                    performanceExams = emptyList(),
-                    selectedPerformanceExams = emptyList(),
-                    courses = emptyList(),
-                    performanceError = null,
-                )
-            }
+            _state.update { it.withPerformanceSession(session) }
             viewModelScope.launch { preferencesStore.putUserString(PREF_PERF_SESSION, session) }
             loadPerformanceClasses(session)
         }
 
         fun selectPerformanceClass(classId: String) {
-            _state.update {
-                it.copy(
-                    selectedPerformanceClass = classId,
-                    performanceDivisions = emptyList(),
-                    selectedPerformanceDivision = null,
-                    performanceExams = emptyList(),
-                    selectedPerformanceExams = emptyList(),
-                    courses = emptyList(),
-                    performanceError = null,
-                )
-            }
+            _state.update { it.withPerformanceClass(classId) }
             viewModelScope.launch { preferencesStore.putUserString(PREF_PERF_CLASS, classId) }
             loadPerformanceDivisions(classId)
         }
 
         fun selectPerformanceDivision(division: String) {
-            _state.update {
-                it.copy(
-                    selectedPerformanceDivision = division,
-                    performanceExams = emptyList(),
-                    selectedPerformanceExams = emptyList(),
-                    courses = emptyList(),
-                    performanceError = null,
-                )
-            }
+            _state.update { it.withPerformanceDivision(division) }
             viewModelScope.launch { preferencesStore.putUserString(PREF_PERF_DIVISION, division) }
             loadPerformanceExams(division)
         }
@@ -170,34 +150,12 @@ class GradesViewModel
         }
 
         fun selectSemesterNum(num: String) {
-            _state.update {
-                it.copy(
-                    selectedSemesterNum = num,
-                    examSessions = emptyList(),
-                    selectedSessionId = null,
-                    reportCards = emptyList(),
-                    pdfFile = null,
-                    marksheetType = "",
-                    subExamTypeAA = "",
-                    classId = "",
-                    acadYear = "",
-                )
-            }
+            _state.update { it.withSemester(num) }
             loadSessions(num, forceRefresh = true)
         }
 
         fun selectSession(sessionId: String) {
-            _state.update {
-                it.copy(
-                    selectedSessionId = sessionId,
-                    reportCards = emptyList(),
-                    pdfFile = null,
-                    marksheetType = "",
-                    subExamTypeAA = "",
-                    classId = "",
-                    acadYear = "",
-                )
-            }
+            _state.update { it.withSession(sessionId) }
             loadGrades(sessionId, forceRefresh = true)
         }
 
@@ -229,12 +187,14 @@ class GradesViewModel
 
         @Suppress("TooGenericExceptionCaught", "LongMethod", "CyclomaticComplexMethod")
         private fun loadSemesters(forceRefresh: Boolean) {
-            viewModelScope.launch {
-                _state.update {
-                    it.copy(
-                        isRefreshing = forceRefresh && it.semesterNumbers.isNotEmpty(),
-                        isLoading = it.semesterNumbers.isEmpty(),
-                    )
+            launchResult { generation ->
+                if (generation == resultGeneration) {
+                    _state.update {
+                        it.copy(
+                            isRefreshing = forceRefresh && it.semesterNumbers.isNotEmpty(),
+                            isLoading = it.semesterNumbers.isEmpty(),
+                        )
+                    }
                 }
                 try {
                     val user = authRepository.getUserInfo() ?: error("Not logged in")
@@ -270,34 +230,40 @@ class GradesViewModel
                             n in 1..maxAllowed
                         }.sortedBy { it.toIntOrNull() ?: Int.MAX_VALUE }
 
-                    _state.update {
-                        val selected =
-                            it.selectedSemesterNum
-                                ?.takeIf { selected -> selected in semNums }
-                        it.copy(
-                            semesterNumbers = semNums,
-                            selectedSemesterNum = selected,
-                            examSessions = if (selected == null) emptyList() else it.examSessions,
-                            selectedSessionId = if (selected == null) null else it.selectedSessionId,
-                            reportCards = if (selected == null) emptyList() else it.reportCards,
-                            pdfFile = if (selected == null) null else it.pdfFile,
-                            marksheetType = if (selected == null) "" else it.marksheetType,
-                            subExamTypeAA = if (selected == null) "" else it.subExamTypeAA,
-                            classId = if (selected == null) "" else it.classId,
-                            acadYear = if (selected == null) "" else it.acadYear,
-                            isLoading = false,
-                            isRefreshing = false,
-                            resultLastUpdated = System.currentTimeMillis(),
-                            error = if (semNums.isEmpty()) "No semester data found" else null,
-                        )
+                    if (generation == resultGeneration) {
+                        _state.update {
+                            val selected =
+                                it.selectedSemesterNum
+                                    ?.takeIf { selected -> selected in semNums }
+                            it.copy(
+                                semesterNumbers = semNums,
+                                selectedSemesterNum = selected,
+                                examSessions = if (selected == null) emptyList() else it.examSessions,
+                                selectedSessionId = if (selected == null) null else it.selectedSessionId,
+                                reportCards = if (selected == null) emptyList() else it.reportCards,
+                                pdfFile = if (selected == null) null else it.pdfFile,
+                                marksheetType = if (selected == null) "" else it.marksheetType,
+                                subExamTypeAA = if (selected == null) "" else it.subExamTypeAA,
+                                classId = if (selected == null) "" else it.classId,
+                                acadYear = if (selected == null) "" else it.acadYear,
+                                isLoading = false,
+                                isRefreshing = false,
+                                resultLastUpdated = System.currentTimeMillis(),
+                                error = if (semNums.isEmpty()) "No semester data found" else null,
+                            )
+                        }
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
-                    _state.update {
-                        it.copy(
-                            isLoading = false,
-                            isRefreshing = false,
-                            error = ErrorText.forData(e),
-                        )
+                    if (generation == resultGeneration) {
+                        _state.update {
+                            it.copy(
+                                isLoading = false,
+                                isRefreshing = false,
+                                error = ErrorText.forData(e),
+                            )
+                        }
                     }
                 }
             }
@@ -308,7 +274,7 @@ class GradesViewModel
             semesterNumeric: String,
             forceRefresh: Boolean,
         ) {
-            viewModelScope.launch {
+            launchResult { generation ->
                 try {
                     val user = authRepository.getUserInfo() ?: error("Not logged in")
                     val sessions =
@@ -319,32 +285,38 @@ class GradesViewModel
                             forceRefresh = forceRefresh,
                         )
 
-                    _state.update {
-                        val selected =
-                            it.selectedSessionId
-                                ?.takeIf { selected -> sessions.any { session -> session.id == selected } }
-                        it.copy(
-                            examSessions = sessions,
-                            selectedSessionId = selected,
-                            reportCards = if (selected == null) emptyList() else it.reportCards,
-                            pdfFile = if (selected == null) null else it.pdfFile,
-                            marksheetType = if (selected == null) "" else it.marksheetType,
-                            subExamTypeAA = if (selected == null) "" else it.subExamTypeAA,
-                            classId = if (selected == null) "" else it.classId,
-                            acadYear = if (selected == null) "" else it.acadYear,
-                            isLoading = false,
-                            isRefreshing = false,
-                            error =
-                                if (sessions.isEmpty()) "No exam sessions found" else null,
-                        )
+                    if (generation == resultGeneration) {
+                        _state.update {
+                            val selected =
+                                it.selectedSessionId
+                                    ?.takeIf { selected -> sessions.any { session -> session.id == selected } }
+                            it.copy(
+                                examSessions = sessions,
+                                selectedSessionId = selected,
+                                reportCards = if (selected == null) emptyList() else it.reportCards,
+                                pdfFile = if (selected == null) null else it.pdfFile,
+                                marksheetType = if (selected == null) "" else it.marksheetType,
+                                subExamTypeAA = if (selected == null) "" else it.subExamTypeAA,
+                                classId = if (selected == null) "" else it.classId,
+                                acadYear = if (selected == null) "" else it.acadYear,
+                                isLoading = false,
+                                isRefreshing = false,
+                                error =
+                                    if (sessions.isEmpty()) "No exam sessions found" else null,
+                            )
+                        }
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
-                    _state.update {
-                        it.copy(
-                            isLoading = false,
-                            isRefreshing = false,
-                            error = ErrorText.forData(e),
-                        )
+                    if (generation == resultGeneration) {
+                        _state.update {
+                            it.copy(
+                                isLoading = false,
+                                isRefreshing = false,
+                                error = ErrorText.forData(e),
+                            )
+                        }
                     }
                 }
             }
@@ -355,7 +327,7 @@ class GradesViewModel
             sessionId: String,
             forceRefresh: Boolean,
         ) {
-            viewModelScope.launch {
+            launchResult { generation ->
                 try {
                     val user = authRepository.getUserInfo() ?: error("Not logged in")
                     val selectedSems =
@@ -370,35 +342,41 @@ class GradesViewModel
                             forceRefresh = forceRefresh,
                         )
 
-                    _state.update {
-                        it.copy(
-                            isLoading = false,
-                            isRefreshing = false,
-                            error =
-                                if (!data.isResultPublish) {
-                                    data.noResultMsg.ifBlank { "Results not published yet" }
-                                } else if (data.reportCards.isEmpty()) {
-                                    "No records found"
-                                } else {
-                                    null
-                                },
-                            reportCards = data.reportCards,
-                            isResultPublish = data.isResultPublish,
-                            noResultMsg = data.noResultMsg,
-                            marksheetType = data.marksheetType,
-                            subExamTypeAA = data.subExamTypeAA,
-                            classId = data.classId,
-                            acadYear = data.acadYear,
-                            resultLastUpdated = System.currentTimeMillis(),
-                        )
+                    if (generation == resultGeneration) {
+                        _state.update {
+                            it.copy(
+                                isLoading = false,
+                                isRefreshing = false,
+                                error =
+                                    if (!data.isResultPublish) {
+                                        data.noResultMsg.ifBlank { "Results not published yet" }
+                                    } else if (data.reportCards.isEmpty()) {
+                                        "No records found"
+                                    } else {
+                                        null
+                                    },
+                                reportCards = data.reportCards,
+                                isResultPublish = data.isResultPublish,
+                                noResultMsg = data.noResultMsg,
+                                marksheetType = data.marksheetType,
+                                subExamTypeAA = data.subExamTypeAA,
+                                classId = data.classId,
+                                acadYear = data.acadYear,
+                                resultLastUpdated = System.currentTimeMillis(),
+                            )
+                        }
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
-                    _state.update {
-                        it.copy(
-                            isLoading = false,
-                            isRefreshing = false,
-                            error = ErrorText.forData(e),
-                        )
+                    if (generation == resultGeneration) {
+                        _state.update {
+                            it.copy(
+                                isLoading = false,
+                                isRefreshing = false,
+                                error = ErrorText.forData(e),
+                            )
+                        }
                     }
                 }
             }
@@ -406,86 +384,108 @@ class GradesViewModel
 
         @Suppress("TooGenericExceptionCaught")
         private fun loadReportCardPdf() {
-            viewModelScope.launch {
-                _state.update { it.copy(isLoadingPdf = true) }
-                try {
-                    val user = authRepository.getUserInfo() ?: error("Not logged in")
-                    val s = _state.value
-                    val pdfBytes =
-                        gradesRepo.getReportCardPdf(
-                            admno = user.admno,
-                            brId = user.brId,
-                            marksheetType = s.marksheetType,
-                            subExamTypeAA = s.subExamTypeAA,
-                            classId = s.classId,
-                            acadYear = s.acadYear,
-                        )
+            pdfJob?.cancel()
+            val generation = ++pdfGeneration
+            val report = _state.value
+            pdfJob =
+                viewModelScope.launch {
+                    if (generation == pdfGeneration) _state.update { it.copy(isLoadingPdf = true) }
+                    try {
+                        val user = authRepository.getUserInfo() ?: error("Not logged in")
+                        val pdfBytes =
+                            gradesRepo.getReportCardPdf(
+                                admno = user.admno,
+                                brId = user.brId,
+                                marksheetType = report.marksheetType,
+                                subExamTypeAA = report.subExamTypeAA,
+                                classId = report.classId,
+                                acadYear = report.acadYear,
+                            )
 
-                    val cacheDir = File(app.cacheDir, "report_cards")
-                    cacheDir.mkdirs()
-                    val file = File(cacheDir, "ReportCard.pdf")
-                    file.writeBytes(pdfBytes)
+                        if (generation != pdfGeneration) return@launch
 
-                    _state.update { it.copy(isLoadingPdf = false, pdfFile = file) }
-                } catch (e: Exception) {
-                    _state.update {
-                        it.copy(
-                            isLoadingPdf = false,
-                            error = ErrorText.forData(e),
-                        )
+                        val cacheDir = File(app.cacheDir, "report_cards")
+                        cacheDir.mkdirs()
+                        val file = File(cacheDir, "ReportCard.pdf")
+                        file.writeBytes(pdfBytes)
+
+                        if (generation == pdfGeneration) _state.update { it.copy(isLoadingPdf = false, pdfFile = file) }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        if (generation == pdfGeneration) {
+                            _state.update {
+                                it.copy(
+                                    isLoadingPdf = false,
+                                    error = ErrorText.forData(e),
+                                )
+                            }
+                        }
                     }
                 }
-            }
         }
 
         @Suppress("TooGenericExceptionCaught")
         private fun loadAdmitCard(forceRefresh: Boolean) {
-            viewModelScope.launch {
-                _state.update {
-                    it.copy(
-                        admitCardLoading = true,
-                        admitCardError = null,
-                        isRefreshing = forceRefresh && it.admitCards.isNotEmpty(),
-                    )
-                }
-                try {
-                    val user = authRepository.getUserInfo() ?: error("Not logged in")
-                    val entries =
-                        gradesRepo.getAdmitCard(
-                            admno = user.admno,
-                            brId = user.brId,
-                            forceRefresh = forceRefresh,
-                        )
-                    _state.update {
-                        it.copy(
-                            admitCardLoading = false,
-                            isRefreshing = false,
-                            admitCards = entries,
-                            admitCardError = if (entries.isEmpty()) "No admit card data available" else null,
-                        )
+            admitJob?.cancel()
+            val generation = ++admitGeneration
+            admitJob =
+                viewModelScope.launch {
+                    if (generation == admitGeneration) {
+                        _state.update {
+                            it.copy(
+                                admitCardLoading = true,
+                                admitCardError = null,
+                                isRefreshing = forceRefresh && it.admitCards.isNotEmpty(),
+                            )
+                        }
                     }
-                } catch (e: Exception) {
-                    _state.update {
-                        it.copy(
-                            admitCardLoading = false,
-                            isRefreshing = false,
-                            admitCardError = ErrorText.forData(e),
-                        )
+                    try {
+                        val user = authRepository.getUserInfo() ?: error("Not logged in")
+                        val entries =
+                            gradesRepo.getAdmitCard(
+                                admno = user.admno,
+                                brId = user.brId,
+                                forceRefresh = forceRefresh,
+                            )
+                        if (generation == admitGeneration) {
+                            _state.update {
+                                it.copy(
+                                    admitCardLoading = false,
+                                    isRefreshing = false,
+                                    admitCards = entries,
+                                    admitCardError = if (entries.isEmpty()) "No admit card data available" else null,
+                                )
+                            }
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        if (generation == admitGeneration) {
+                            _state.update {
+                                it.copy(
+                                    admitCardLoading = false,
+                                    isRefreshing = false,
+                                    admitCardError = ErrorText.forData(e),
+                                )
+                            }
+                        }
                     }
                 }
-            }
         }
 
         @Suppress("TooGenericExceptionCaught", "LongMethod")
         private fun loadPerformance(forceRefresh: Boolean) {
-            viewModelScope.launch {
-                _state.update {
-                    it.copy(
-                        performanceLoading = true,
-                        performanceError = null,
-                        isLoading = it.performanceYears.isEmpty(),
-                        isRefreshing = forceRefresh && it.performanceYears.isNotEmpty(),
-                    )
+            launchPerformance { generation ->
+                if (generation == performanceGeneration) {
+                    _state.update {
+                        it.copy(
+                            performanceLoading = true,
+                            performanceError = null,
+                            isLoading = it.performanceYears.isEmpty(),
+                            isRefreshing = forceRefresh && it.performanceYears.isNotEmpty(),
+                        )
+                    }
                 }
                 try {
                     val user = authRepository.getUserInfo() ?: error("Not logged in")
@@ -537,34 +537,40 @@ class GradesViewModel
                             )
                         }.orEmpty()
 
-                    _state.update {
-                        it.copy(
-                            performanceLoading = false,
-                            isLoading = false,
-                            isRefreshing = false,
-                            performanceYears = setup.academicYears,
-                            performanceSemester = setup.semester,
-                            selectedPerformanceYear = selectedYear,
-                            performanceSessions = sessions,
-                            selectedPerformanceSession = selectedSession,
-                            performanceClasses = classes,
-                            selectedPerformanceClass = selectedClass,
-                            performanceDivisions = divisions,
-                            selectedPerformanceDivision = selectedDivision,
-                            performanceExams = exams,
-                            selectedPerformanceExams = emptyList(),
-                            courses = emptyList(),
-                            performanceLastUpdated = System.currentTimeMillis(),
-                        )
+                    if (generation == performanceGeneration) {
+                        _state.update {
+                            it.copy(
+                                performanceLoading = false,
+                                isLoading = false,
+                                isRefreshing = false,
+                                performanceYears = setup.academicYears,
+                                performanceSemester = setup.semester,
+                                selectedPerformanceYear = selectedYear,
+                                performanceSessions = sessions,
+                                selectedPerformanceSession = selectedSession,
+                                performanceClasses = classes,
+                                selectedPerformanceClass = selectedClass,
+                                performanceDivisions = divisions,
+                                selectedPerformanceDivision = selectedDivision,
+                                performanceExams = exams,
+                                selectedPerformanceExams = emptyList(),
+                                courses = emptyList(),
+                                performanceLastUpdated = System.currentTimeMillis(),
+                            )
+                        }
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
-                    _state.update {
-                        it.copy(
-                            performanceLoading = false,
-                            isLoading = false,
-                            isRefreshing = false,
-                            performanceError = ErrorText.forData(e),
-                        )
+                    if (generation == performanceGeneration) {
+                        _state.update {
+                            it.copy(
+                                performanceLoading = false,
+                                isLoading = false,
+                                isRefreshing = false,
+                                performanceError = ErrorText.forData(e),
+                            )
+                        }
                     }
                 }
             }
@@ -588,8 +594,8 @@ class GradesViewModel
 
         @Suppress("TooGenericExceptionCaught")
         private fun loadPerformanceSessions(year: String) {
-            viewModelScope.launch {
-                _state.update { it.copy(performanceLoading = true, performanceError = null) }
+            launchPerformance { generation ->
+                if (generation == performanceGeneration) _state.update { it.copy(performanceLoading = true, performanceError = null) }
                 try {
                     val user = authRepository.getUserInfo() ?: error("Not logged in")
                     val sessions =
@@ -598,19 +604,25 @@ class GradesViewModel
                             brId = user.brId,
                             academicYear = year,
                         )
-                    _state.update {
-                        it.copy(
-                            performanceLoading = false,
-                            performanceSessions = sessions,
-                            performanceError = if (sessions.isEmpty()) "No exam sessions found" else null,
-                        )
+                    if (generation == performanceGeneration) {
+                        _state.update {
+                            it.copy(
+                                performanceLoading = false,
+                                performanceSessions = sessions,
+                                performanceError = if (sessions.isEmpty()) "No exam sessions found" else null,
+                            )
+                        }
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
-                    _state.update {
-                        it.copy(
-                            performanceLoading = false,
-                            performanceError = ErrorText.forData(e),
-                        )
+                    if (generation == performanceGeneration) {
+                        _state.update {
+                            it.copy(
+                                performanceLoading = false,
+                                performanceError = ErrorText.forData(e),
+                            )
+                        }
                     }
                 }
             }
@@ -618,8 +630,8 @@ class GradesViewModel
 
         @Suppress("TooGenericExceptionCaught")
         private fun loadPerformanceClasses(session: String) {
-            viewModelScope.launch {
-                _state.update { it.copy(performanceLoading = true, performanceError = null) }
+            launchPerformance { generation ->
+                if (generation == performanceGeneration) _state.update { it.copy(performanceLoading = true, performanceError = null) }
                 try {
                     val user = authRepository.getUserInfo() ?: error("Not logged in")
                     val year = _state.value.selectedPerformanceYear.orEmpty()
@@ -630,23 +642,34 @@ class GradesViewModel
                             academicYear = year,
                             examSession = session,
                         )
-                    _state.update {
-                        it.copy(
-                            performanceLoading = false,
-                            performanceClasses = classes,
-                            performanceError = if (classes.isEmpty()) "No classes found for this session" else null,
-                        )
+                    if (generation == performanceGeneration) {
+                        _state.update {
+                            it.copy(
+                                performanceLoading = false,
+                                performanceClasses = classes,
+                                performanceError = if (classes.isEmpty()) "No classes found for this session" else null,
+                            )
+                        }
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
-                    _state.update { it.copy(performanceLoading = false, performanceError = ErrorText.forData(e)) }
+                    if (generation == performanceGeneration) {
+                        _state.update {
+                            it.copy(
+                                performanceLoading = false,
+                                performanceError = ErrorText.forData(e),
+                            )
+                        }
+                    }
                 }
             }
         }
 
         @Suppress("TooGenericExceptionCaught")
         private fun loadPerformanceDivisions(classId: String) {
-            viewModelScope.launch {
-                _state.update { it.copy(performanceLoading = true, performanceError = null) }
+            launchPerformance { generation ->
+                if (generation == performanceGeneration) _state.update { it.copy(performanceLoading = true, performanceError = null) }
                 try {
                     val user = authRepository.getUserInfo() ?: error("Not logged in")
                     val divisions =
@@ -655,23 +678,34 @@ class GradesViewModel
                             brId = user.brId,
                             classId = classId,
                         )
-                    _state.update {
-                        it.copy(
-                            performanceLoading = false,
-                            performanceDivisions = divisions,
-                            performanceError = if (divisions.isEmpty()) "No divisions found for this class" else null,
-                        )
+                    if (generation == performanceGeneration) {
+                        _state.update {
+                            it.copy(
+                                performanceLoading = false,
+                                performanceDivisions = divisions,
+                                performanceError = if (divisions.isEmpty()) "No divisions found for this class" else null,
+                            )
+                        }
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
-                    _state.update { it.copy(performanceLoading = false, performanceError = ErrorText.forData(e)) }
+                    if (generation == performanceGeneration) {
+                        _state.update {
+                            it.copy(
+                                performanceLoading = false,
+                                performanceError = ErrorText.forData(e),
+                            )
+                        }
+                    }
                 }
             }
         }
 
         @Suppress("TooGenericExceptionCaught")
         private fun loadPerformanceExams(division: String) {
-            viewModelScope.launch {
-                _state.update { it.copy(performanceLoading = true, performanceError = null) }
+            launchPerformance { generation ->
+                if (generation == performanceGeneration) _state.update { it.copy(performanceLoading = true, performanceError = null) }
                 try {
                     val user = authRepository.getUserInfo() ?: error("Not logged in")
                     val s = _state.value
@@ -683,23 +717,34 @@ class GradesViewModel
                             classId = s.selectedPerformanceClass.orEmpty(),
                             division = division,
                         )
-                    _state.update {
-                        it.copy(
-                            performanceLoading = false,
-                            performanceExams = exams,
-                            performanceError = if (exams.isEmpty()) "No exams found for this division" else null,
-                        )
+                    if (generation == performanceGeneration) {
+                        _state.update {
+                            it.copy(
+                                performanceLoading = false,
+                                performanceExams = exams,
+                                performanceError = if (exams.isEmpty()) "No exams found for this division" else null,
+                            )
+                        }
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
-                    _state.update { it.copy(performanceLoading = false, performanceError = ErrorText.forData(e)) }
+                    if (generation == performanceGeneration) {
+                        _state.update {
+                            it.copy(
+                                performanceLoading = false,
+                                performanceError = ErrorText.forData(e),
+                            )
+                        }
+                    }
                 }
             }
         }
 
         @Suppress("TooGenericExceptionCaught")
         private fun loadPerformanceMarks() {
-            viewModelScope.launch {
-                _state.update { it.copy(performanceLoading = true, performanceError = null) }
+            launchPerformance { generation ->
+                if (generation == performanceGeneration) _state.update { it.copy(performanceLoading = true, performanceError = null) }
                 try {
                     val user = authRepository.getUserInfo() ?: error("Not logged in")
                     val s = _state.value
@@ -715,17 +760,28 @@ class GradesViewModel
                             examIds = s.selectedPerformanceExams,
                             forceRefresh = true,
                         )
-                    _state.update {
-                        it.copy(
-                            performanceLoading = false,
-                            courses = courses,
-                            showMarksInsights = false,
-                            performanceLastUpdated = System.currentTimeMillis(),
-                            performanceError = if (courses.isEmpty()) "No marks found for this exam" else null,
-                        )
+                    if (generation == performanceGeneration) {
+                        _state.update {
+                            it.copy(
+                                performanceLoading = false,
+                                courses = courses,
+                                showMarksInsights = false,
+                                performanceLastUpdated = System.currentTimeMillis(),
+                                performanceError = if (courses.isEmpty()) "No marks found for this exam" else null,
+                            )
+                        }
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
-                    _state.update { it.copy(performanceLoading = false, performanceError = ErrorText.forData(e)) }
+                    if (generation == performanceGeneration) {
+                        _state.update {
+                            it.copy(
+                                performanceLoading = false,
+                                performanceError = ErrorText.forData(e),
+                            )
+                        }
+                    }
                 }
             }
         }
