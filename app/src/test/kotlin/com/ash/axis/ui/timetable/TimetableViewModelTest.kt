@@ -132,6 +132,27 @@ class TimetableViewModelTest {
 
     private fun key(monday: LocalDate) = TimetableKey(context, monday.toString(), monday.plusDays(6).toString())
 
+    @Test
+    fun `clearing a shared snapshot removes the derived week`() =
+        runTest(dispatcher) {
+            val viewModel = viewModel()
+            try {
+                val current = LocalDate.now().with(DayOfWeek.MONDAY)
+                runCurrent()
+                weeks.getValue(key(current)).value = AcademicSnapshot(data = TimetableData(emptyMap(), emptyMap()))
+                runCurrent()
+                assertTrue(current in viewModel.state.value.loadedWeeks)
+
+                weeks.getValue(key(current)).value = AcademicSnapshot()
+                runCurrent()
+
+                assertFalse(current in viewModel.state.value.loadedWeeks)
+                assertFalse(current in viewModel.state.value.dayCache)
+            } finally {
+                viewModel.viewModelScope.cancel()
+            }
+        }
+
     private fun viewModel() =
         TimetableViewModel(
             repository,
