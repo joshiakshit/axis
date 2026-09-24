@@ -1,6 +1,6 @@
 # Lean app refactor: orchestration plan
 
-Status: corrected data and UI foundations integrated. Wave 2 baseline verified. See [the wave 2 baseline](reports/00-wave2-baseline.md) for checks, remaining gates, and consumer constraints. Use the supplied isolated checkout and exact launch commit before starting an assignment.
+Status: wave 2 baseline remains fixed. Agents 04 and 05 need the corrections in [the wave 2 review](reports/02-master-review.md) before acceptance. Shared API gaps are assigned to agent 06 after the wave is integrated. See [the wave 2 baseline](reports/00-wave2-baseline.md) for the original launch checks and constraints.
 
 Use GPT-6 Sol at medium reasoning for the seven assignments below. The master planner owns sequencing, shared contracts, integration decisions, and acceptance. Implementation agents do not delegate further.
 

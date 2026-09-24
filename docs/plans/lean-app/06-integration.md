@@ -13,6 +13,7 @@ Connect the shared data path to real app lifecycle, navigation, preferences, QR 
 - `data/export/DataExporter.kt` only for compatibility with the final repository APIs; preserve export behavior and formats.
 - Dead transitional APIs in earlier agents' files, after confirming all callers are migrated. No new broad refactor.
 - Integration tests, minimal debug-only measurement support if necessary, and screenshots in `docs/screenshots/lean-app/06/`.
+- Master-approved wave 2 API closure: `data/academic/*`, attendance/timetable repository demand APIs, matching tests, and the minimal 04/05 consumer changes needed to adopt coherent selected-semester state and bounded planner/prefetch requests. Read `reports/02-master-review.md`. This is limited to the documented gaps; do not reopen unrelated data architecture.
 
 Keep auth/token storage, backend, dependency upgrades, signing, release versions, and deployment outside this task. Escalate a required security/lifecycle change to the master rather than weakening isolation.
 
@@ -25,6 +26,7 @@ Keep auth/token storage, backend, dependency upgrades, signing, release versions
 5. Remove DataRefreshSignal only after all remaining callers are migrated. If non-core consumers still use it, retain a narrow path with a documented reason. Do not leave parallel old/new fetching for the same dataset.
 6. Remove unused transitional repository APIs, duplicate raw state, and dead imports. Do not remove methods still used by grades, exports, or tests of live behavior.
 7. Validate DI in debug and release compilation. Reconcile integrated API mismatches with the responsible agent's contract.
+8. Close the shared API gaps assigned in `reports/02-master-review.md`. Publish account-bound semester selection, separate visible/current-week demand from required planner coverage and speculative prefetch, update the data contract, and remove temporary consumer selection discovery. Add controlled consumer-level tests for these transitions. A missing coverage API or per-resource semaphore alone does not satisfy integrated priority acceptance.
 
 ## Automated gate
 
