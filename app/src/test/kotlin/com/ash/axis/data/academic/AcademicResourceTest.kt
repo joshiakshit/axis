@@ -225,4 +225,71 @@ class AcademicResourceTest {
             assertEquals(0, writes)
             assertEquals(null, state.value.data)
         }
+
+    @Test
+    fun `new visible range skips older queued ranges while keeping two active loads`() =
+        runTest {
+            val first = CompletableDeferred<String>()
+            val second = CompletableDeferred<String>()
+            val calls = mutableListOf<String>()
+            val resource =
+                AcademicResource<String, String>(
+                    backgroundScope,
+                    { null },
+                    { key ->
+                        calls += key
+                        when (key) {
+                            "first" -> first.await()
+                            "second" -> second.await()
+                            else -> key
+                        }
+                    },
+                    { _, _ -> 200L },
+                )
+
+            resource.request("first")
+            resource.request("second")
+            resource.request("old queued")
+            val visible = resource.request("visible")
+            runCurrent()
+            assertEquals(listOf("first", "second"), calls)
+
+            resource.prioritize("visible")
+            resource.request("visible")
+            runCurrent()
+            first.complete("done")
+            runCurrent()
+
+            assertEquals(listOf("first", "second", "visible"), calls)
+            assertEquals("visible", visible.value.data)
+            second.complete("done")
+        }
+
+    @Test
+    fun `mutation reloads only the visible range after historical ranges are invalidated`() =
+        runTest {
+            val calls = mutableListOf<String>()
+            val resource =
+                AcademicResource<String, String>(
+                    backgroundScope,
+                    { null },
+                    { key ->
+                        calls += key
+                        key
+                    },
+                    { _, _ -> 200L },
+                )
+
+            val old = resource.request("historical")
+            resource.request("another historical")
+            val current = resource.request("visible")
+            runCurrent()
+            resource.invalidateAll(clear = {}, reloadKey = "visible")
+            runCurrent()
+
+            assertEquals(4, calls.size)
+            assertEquals(2, calls.count { it == "visible" })
+            assertEquals(CacheFreshness.STALE, old.value.freshness)
+            assertEquals("visible", current.value.data)
+        }
 }

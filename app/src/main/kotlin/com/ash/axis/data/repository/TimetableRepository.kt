@@ -73,6 +73,7 @@ class TimetableRepository
             force: Boolean = false,
         ): StateFlow<AcademicSnapshot<TimetableData>> {
             if (force) clearRoute(key.context)
+            timetable.prioritize(key)
             return timetable.request(key, force)
         }
 

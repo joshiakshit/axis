@@ -9,7 +9,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 
 data class AcademicSnapshot<T>(
     val data: T? = null,
@@ -32,10 +34,13 @@ class AcademicResource<K, T>(
         var generation = 0L
         var forceAfterLoad = false
         var jobForced = false
+        var started = false
     }
 
     private val mutex = Mutex()
+    private val permits = Semaphore(2)
     private val entries = mutableMapOf<K, Entry<T>>()
+    private var invalidationEpoch = 0L
 
     suspend fun observe(key: K): StateFlow<AcademicSnapshot<T>> =
         mutex.withLock {
@@ -47,22 +52,43 @@ class AcademicResource<K, T>(
         force: Boolean = false,
     ): StateFlow<AcademicSnapshot<T>> {
         val state = observe(key)
-        val observedGeneration = mutex.withLock { entries[key]?.generation }
+        val observed = mutex.withLock { entries[key] to invalidationEpoch }
         val cached = read(key)
         mutex.withLock {
             val entry = entries[key] ?: return state
-            if (entry.generation != observedGeneration) return state
-            if (entry.state.value.data == null && cached != null) {
-                entry.state.value = AcademicSnapshot(cached.data, cached.cachedAtMillis, freshness = cached.freshness)
+            if (entry !== observed.first || invalidationEpoch != observed.second) return state
+            if (cached != null && (entry.state.value.updatedAtMillis ?: Long.MIN_VALUE) <= cached.cachedAtMillis) {
+                entry.state.value =
+                    entry.state.value.copy(
+                        data = cached.data,
+                        updatedAtMillis = cached.cachedAtMillis,
+                        freshness = cached.freshness,
+                    )
+            } else if (cached == null && entry.state.value.data != null) {
+                entry.state.value = entry.state.value.copy(freshness = CacheFreshness.STALE)
             }
             if (entry.job?.isActive == true) {
                 if (force && !entry.jobForced) entry.forceAfterLoad = true
                 return state
             }
-            if (!force && entry.state.value.freshness == CacheFreshness.FRESH) return state
+            if (!force && cached?.freshness == CacheFreshness.FRESH) return state
             launch(key, entry, force)
         }
         return state
+    }
+
+    suspend fun prioritize(key: K) {
+        mutex.withLock {
+            entries.forEach { (queuedKey, entry) ->
+                if (queuedKey != key && entry.job?.isActive == true && !entry.started) {
+                    entry.generation++
+                    entry.job?.cancel()
+                    entry.job = null
+                    entry.forceAfterLoad = false
+                    entry.state.value = entry.state.value.copy(refreshing = false)
+                }
+            }
+        }
     }
 
     suspend fun invalidate(
@@ -71,6 +97,7 @@ class AcademicResource<K, T>(
         clear: suspend () -> Unit = {},
     ) {
         mutex.withLock {
+            invalidationEpoch++
             val entry = entries[key]
             if (entry == null) {
                 clear()
@@ -88,6 +115,7 @@ class AcademicResource<K, T>(
 
     suspend fun deactivate() {
         mutex.withLock {
+            invalidationEpoch++
             entries.values.forEach {
                 it.generation++
                 it.job?.cancel()
@@ -97,8 +125,12 @@ class AcademicResource<K, T>(
         }
     }
 
-    suspend fun invalidateAll(clear: suspend () -> Unit) {
+    suspend fun invalidateAll(
+        clear: suspend () -> Unit,
+        reloadKey: K? = null,
+    ) {
         mutex.withLock {
+            invalidationEpoch++
             entries.values.forEach {
                 it.generation++
                 it.job?.cancel()
@@ -107,18 +139,18 @@ class AcademicResource<K, T>(
                 it.state.value = it.state.value.copy(refreshing = false, freshness = CacheFreshness.STALE)
             }
             clear()
-            entries.forEach { (key, entry) -> launch(key, entry, forced = true) }
+            reloadKey?.let { key -> entries[key]?.let { launch(key, it, forced = true) } }
         }
     }
 
     suspend fun clearCache(clear: suspend () -> Unit) {
         mutex.withLock {
+            invalidationEpoch++
             entries.values.forEach {
                 it.generation++
                 it.job?.cancel()
                 it.state.value = AcademicSnapshot()
             }
-            entries.clear()
             clear()
         }
     }
@@ -130,15 +162,22 @@ class AcademicResource<K, T>(
     ) {
         val generation = ++entry.generation
         entry.jobForced = forced
+        entry.started = false
         entry.state.value = entry.state.value.copy(refreshing = true, error = null)
         entry.job =
             scope.launch {
                 try {
-                    val data = fetch(key)
-                    mutex.withLock {
-                        if (entries[key] !== entry || entry.generation != generation) return@withLock
-                        val updatedAt = write(key, data)
-                        entry.state.value = AcademicSnapshot(data, updatedAt, freshness = CacheFreshness.FRESH)
+                    permits.withPermit {
+                        mutex.withLock {
+                            if (entries[key] !== entry || entry.generation != generation) return@withPermit
+                            entry.started = true
+                        }
+                        val data = fetch(key)
+                        mutex.withLock {
+                            if (entries[key] !== entry || entry.generation != generation) return@withLock
+                            val updatedAt = write(key, data)
+                            entry.state.value = AcademicSnapshot(data, updatedAt, freshness = CacheFreshness.FRESH)
+                        }
                     }
                 } catch (error: CancellationException) {
                     throw error

@@ -77,20 +77,28 @@ class AttendanceRepository
                 },
                 { key, data -> typedCache.write(key.cacheKey, data, DaywiseResponse.serializer()) },
             )
+        private var visibleDaywise: DaywiseKey? = null
 
         suspend fun observeSummary(key: AttendanceKey): StateFlow<AcademicSnapshot<AttendanceResponse>> = summary.observe(key)
 
         suspend fun requestSummary(
             key: AttendanceKey,
             force: Boolean = false,
-        ): StateFlow<AcademicSnapshot<AttendanceResponse>> = summary.request(key, force)
+        ): StateFlow<AcademicSnapshot<AttendanceResponse>> {
+            summary.prioritize(key)
+            return summary.request(key, force)
+        }
 
         suspend fun observeDaywise(key: DaywiseKey): StateFlow<AcademicSnapshot<DaywiseResponse>> = daily.observe(key)
 
         suspend fun requestDaywise(
             key: DaywiseKey,
             force: Boolean = false,
-        ): StateFlow<AcademicSnapshot<DaywiseResponse>> = daily.request(key, force)
+        ): StateFlow<AcademicSnapshot<DaywiseResponse>> {
+            visibleDaywise = key
+            daily.prioritize(key)
+            return daily.request(key, force)
+        }
 
         suspend fun invalidateSummary(key: AttendanceKey) = summary.invalidate(key, clear = { academicCacheDao.delete(key.cacheKey) })
 
@@ -98,10 +106,11 @@ class AttendanceRepository
 
         suspend fun invalidateDaywiseForAccount(context: StudentRequestContext) {
             val prefix = "v4_daywise_${context.admno}_${context.brId}_${context.clientId}_"
-            daily.invalidateAll { academicCacheDao.deletePrefix(prefix) }
+            daily.invalidateAll(clear = { academicCacheDao.deletePrefix(prefix) }, reloadKey = visibleDaywise)
         }
 
         suspend fun deactivateAcademicData() {
+            visibleDaywise = null
             summary.deactivate()
             daily.deactivate()
         }
@@ -416,7 +425,8 @@ class AttendanceRepository
         }
 
         suspend fun clearCache() {
-            daily.deactivate()
+            visibleDaywise = null
+            daily.clearCache { }
             summary.clearCache { cacheStore.clear() }
         }
     }
