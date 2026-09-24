@@ -4,13 +4,19 @@ import com.ash.axis.data.api.ICloudEmsApi
 import com.ash.axis.data.db.CacheDao
 import com.ash.axis.data.db.CacheEntity
 import com.ash.axis.domain.model.StudentRequestContext
+import com.ash.axis.domain.model.UserInfo
 import io.mockk.Runs
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
 import io.mockk.slot
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
@@ -120,8 +126,45 @@ class TimetableRepositoryTest {
             coVerify(exactly = 0) { api.postTimetable(any()) }
         }
 
+    @Test
+    fun `cancelled schedule does not become cached success`() =
+        runTest {
+            stubCache()
+            coEvery { api.postTimetableV1(any()) } returns success("""{"status":false}""")
+            coEvery { api.postTimetable(any()) } throws CancellationException("cancelled")
+            coEvery { cacheDao.get(match { it.startsWith("v3_timetable_weekly") }) } returns
+                CacheEntity("saved", "{\"Mon\":[]}")
+
+            val failure =
+                runCatching {
+                    repository.getTimetable(context, "2026-09-07", "2026-09-13", forceRefresh = true)
+                }.exceptionOrNull()
+
+            assertTrue(failure is CancellationException)
+        }
+
+    @Test
+    fun `weekly and dated views share one transport response`() =
+        runBlocking {
+            stubCache()
+            coEvery { api.postTimetableV1(any()) } returns success("""{"status":false}""")
+            coEvery { api.postTimetable(any()) } returns
+                success(
+                    """{"emp_timetable":{"2026-09-07":[{"from_time":"09:00","to_time":"10:00","subject_id":"CS1"}]}}""",
+                )
+            val key = TimetableKey(context, "2026-09-07", "2026-09-13")
+
+            val state = repository.requestWeek(key)
+            val data = withTimeout(5_000) { state.first { it.data != null && !it.refreshing }.data!! }
+
+            assertEquals("CS1", data.weekly.getValue("Mon").single().subjectId)
+            assertEquals("CS1", data.dated?.getValue("2026-09-07")?.single()?.subjectId)
+            coVerify(exactly = 1) { api.postTimetable(any()) }
+        }
+
     private fun stubCache(stored: io.mockk.CapturingSlot<CacheEntity>? = null) {
         coEvery { authRepository.refreshTokenIfNeeded() } returns "access"
+        every { authRepository.getUserInfo() } returns UserInfo("21001", 11, "", "", "", "clientMixedCase")
         coEvery { cacheDao.get(any()) } returns null
         if (stored == null) {
             coEvery { cacheDao.put(any()) } just Runs

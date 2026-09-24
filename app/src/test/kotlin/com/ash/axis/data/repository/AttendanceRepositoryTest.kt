@@ -3,14 +3,21 @@ package com.ash.axis.data.repository
 import com.ash.axis.data.api.ICloudEmsApi
 import com.ash.axis.data.api.QrAttendanceApi
 import com.ash.axis.data.db.CacheDao
+import com.ash.axis.domain.model.StudentRequestContext
+import com.ash.axis.domain.model.UserInfo
 import com.ash.axis.ui.qr.QrDiagnostics
 import com.ash.axis.ui.qr.QrScanMode
 import com.ash.axis.ui.qr.QrStage
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -23,6 +30,68 @@ import org.junit.jupiter.api.Test
 import retrofit2.Response
 
 class AttendanceRepositoryTest {
+    @Test
+    fun `observable summary accepts empty success with exact client id`() =
+        runBlocking {
+            val api = mockk<ICloudEmsApi>()
+            val cacheDao = mockk<CacheDao>()
+            val authRepository = mockk<AuthRepository>()
+            val body = slot<RequestBody>()
+            coEvery { cacheDao.get(any()) } returns null
+            coEvery { cacheDao.put(any()) } returns Unit
+            coEvery { authRepository.refreshTokenIfNeeded() } returns "token"
+            every { authRepository.getUserInfo() } returns UserInfo("21001", 11, "", "", "", "clientMixedCase")
+            coEvery { api.postAttendance(capture(body)) } returns
+                Response.success(
+                    """{"attendance":{"table":{},"endrow":{}}}""".toResponseBody(),
+                )
+            val repository = AttendanceRepository(api, mockk<QrAttendanceApi>(), cacheDao, authRepository, Json)
+            val key = AttendanceKey(StudentRequestContext("21001", 11, "clientMixedCase", "2026-2027"), "C1", "2025-2026")
+
+            val state = repository.requestSummary(key)
+            val result = withTimeout(5_000) { state.first { it.data != null && !it.refreshing } }
+
+            assertEquals(emptyMap<String, Any>(), result.data?.table)
+            assertTrue(result.updatedAtMillis != null)
+            val buffer = Buffer()
+            body.captured.writeTo(buffer)
+            val payload = Json.parseToJsonElement(buffer.readUtf8()).jsonObject
+            assertEquals("clientMixedCase", payload.getValue("client").jsonPrimitive.content)
+            assertEquals("2025-2026", payload.getValue("year").jsonPrimitive.content)
+        }
+
+    @Test
+    fun `account change during summary request cannot write old cache`() =
+        runBlocking {
+            val api = mockk<ICloudEmsApi>()
+            val cacheDao = mockk<CacheDao>()
+            val authRepository = mockk<AuthRepository>()
+            val started = CompletableDeferred<Unit>()
+            val response = CompletableDeferred<Unit>()
+            var currentAdmno = "21001"
+            coEvery { cacheDao.get(any()) } returns null
+            coEvery { authRepository.refreshTokenIfNeeded() } returns "token"
+            every { authRepository.getUserInfo() } answers {
+                UserInfo(currentAdmno, 11, "", "", "", "clientMixedCase")
+            }
+            coEvery { api.postAttendance(any()) } coAnswers {
+                started.complete(Unit)
+                response.await()
+                Response.success("""{"attendance":{"table":{},"endrow":{}}}""".toResponseBody())
+            }
+            val repository = AttendanceRepository(api, mockk<QrAttendanceApi>(), cacheDao, authRepository, Json)
+            val key = AttendanceKey(StudentRequestContext("21001", 11, "clientMixedCase", "2026-2027"), "C1", "2025-2026")
+
+            val state = repository.requestSummary(key)
+            withTimeout(5_000) { started.await() }
+            currentAdmno = "other"
+            response.complete(Unit)
+            val result = withTimeout(5_000) { state.first { it.error != null } }
+
+            assertEquals(null, result.data)
+            coVerify(exactly = 0) { cacheDao.put(any()) }
+        }
+
     @Test
     fun `qr scan preserves the jwt client id`() =
         runTest {

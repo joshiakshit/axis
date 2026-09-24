@@ -1,19 +1,28 @@
 package com.ash.axis.data.repository
 
+import com.ash.axis.data.academic.AcademicResource
+import com.ash.axis.data.academic.AcademicSnapshot
 import com.ash.axis.data.api.ICloudEmsApi
 import com.ash.axis.data.api.QrAttendanceApi
 import com.ash.axis.data.db.CacheDao
+import com.ash.axis.data.db.JsonCache
 import com.ash.axis.domain.model.AcadYear
 import com.ash.axis.domain.model.AttendanceResponse
 import com.ash.axis.domain.model.ClassInfo
 import com.ash.axis.domain.model.DaywiseResponse
 import com.ash.axis.domain.model.QrScanResult
 import com.ash.axis.domain.model.SemesterOption
+import com.ash.axis.domain.model.StudentRequestContext
 import com.ash.axis.tenant.Tenants
 import com.ash.core.storage.CachePolicy
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
@@ -41,6 +50,68 @@ class AttendanceRepository
         private val qrResultParser = QrScanResultParser(json)
         private val acadYearListSerializer = ListSerializer(AcadYear.serializer())
         private val classInfoListSerializer = ListSerializer(ClassInfo.serializer())
+        private val typedCache = JsonCache(cacheDao, json)
+        private val academicCacheDao = cacheDao
+        private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        private val summary =
+            AcademicResource(
+                scope,
+                { key: AttendanceKey -> typedCache.read(key.cacheKey, AttendanceResponse.serializer(), CachePolicy.ATTENDANCE) },
+                { key ->
+                    requireActiveAccount(key.context)
+                    fetchAttendance(key.context.admno, key.context.brId, key.classId, key.year, key.context.clientId).also {
+                        requireActiveAccount(key.context)
+                    }
+                },
+                { key, data -> typedCache.write(key.cacheKey, data, AttendanceResponse.serializer()) },
+            )
+        private val daily =
+            AcademicResource(
+                scope,
+                { key: DaywiseKey -> typedCache.read(key.cacheKey, DaywiseResponse.serializer(), CachePolicy.DAYWISE) },
+                { key ->
+                    requireActiveAccount(key.context)
+                    fetchDaywise(key.context.admno, key.context.brId, key.year, key.fromDate, key.toDate, key.context.clientId).also {
+                        requireActiveAccount(key.context)
+                    }
+                },
+                { key, data -> typedCache.write(key.cacheKey, data, DaywiseResponse.serializer()) },
+            )
+
+        suspend fun observeSummary(key: AttendanceKey): StateFlow<AcademicSnapshot<AttendanceResponse>> = summary.observe(key)
+
+        suspend fun requestSummary(
+            key: AttendanceKey,
+            force: Boolean = false,
+        ): StateFlow<AcademicSnapshot<AttendanceResponse>> = summary.request(key, force)
+
+        suspend fun observeDaywise(key: DaywiseKey): StateFlow<AcademicSnapshot<DaywiseResponse>> = daily.observe(key)
+
+        suspend fun requestDaywise(
+            key: DaywiseKey,
+            force: Boolean = false,
+        ): StateFlow<AcademicSnapshot<DaywiseResponse>> = daily.request(key, force)
+
+        suspend fun invalidateSummary(key: AttendanceKey) = summary.invalidate(key, clear = { academicCacheDao.delete(key.cacheKey) })
+
+        suspend fun invalidateDaywise(key: DaywiseKey) = daily.invalidate(key, clear = { academicCacheDao.delete(key.cacheKey) })
+
+        suspend fun invalidateDaywiseForAccount(context: StudentRequestContext) {
+            val prefix = "v4_daywise_${context.admno}_${context.brId}_${context.clientId}_"
+            daily.invalidateAll { academicCacheDao.deletePrefix(prefix) }
+        }
+
+        suspend fun deactivateAcademicData() {
+            summary.deactivate()
+            daily.deactivate()
+        }
+
+        private fun requireActiveAccount(context: StudentRequestContext) {
+            val user = authRepository.getUserInfo()
+            check(user != null && user.admno == context.admno && user.brId == context.brId && user.clientId == context.clientId) {
+                "Academic request account changed"
+            }
+        }
 
         suspend fun getPreferredSemester(
             admno: String,
@@ -67,16 +138,22 @@ class AttendanceRepository
                 coroutineScope {
                     years.map { year ->
                         async {
-                            runCatching {
-                                getClasses(admno, brId, year.id, forceRefresh)
-                                    .filter { it.id.isNotBlank() }
-                                    .map { classInfo ->
-                                        SemesterOption(
-                                            yearId = year.id,
-                                            classId = classInfo.id,
-                                            label = classInfo.displayLabel(year),
-                                        )
-                                    }
+                            try {
+                                val options =
+                                    getClasses(admno, brId, year.id, forceRefresh)
+                                        .filter { it.id.isNotBlank() }
+                                        .map { classInfo ->
+                                            SemesterOption(
+                                                yearId = year.id,
+                                                classId = classInfo.id,
+                                                label = classInfo.displayLabel(year),
+                                            )
+                                        }
+                                Result.success(options)
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (error: Exception) {
+                                Result.failure(error)
                             }
                         }
                     }.awaitAll()
@@ -124,6 +201,8 @@ class AttendanceRepository
                 val years = json.decodeFromJsonElement(acadYearListSerializer, yearsJson)
                 cacheStore.store(cacheKey, years, acadYearListSerializer)
                 years
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 cacheStore.cachedAnyAge(cacheKey, acadYearListSerializer)
                     ?: throw e
@@ -166,6 +245,8 @@ class AttendanceRepository
                 val classes = json.decodeFromJsonElement(classInfoListSerializer, classesJson)
                 cacheStore.store(cacheKey, classes, classInfoListSerializer)
                 classes
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 cacheStore.cachedAnyAge(cacheKey, classInfoListSerializer)
                     ?: throw e
@@ -185,31 +266,11 @@ class AttendanceRepository
             }
 
             return try {
-                authRepository.refreshTokenIfNeeded()
-                val result =
-                    studentApi.parseStudentResponse(
-                        studentApi.requireBody(
-                            endpoint = "getAttendance",
-                            response =
-                                api.postAttendance(
-                                    studentApi.jsonBody(
-                                        "from" to "app",
-                                        "method" to "GetCourseWiseReport",
-                                        "admno" to admno,
-                                        "client" to Tenants.GU.clientCode,
-                                        "branch_id" to brId,
-                                        "year" to year,
-                                        "curyear" to year,
-                                        "classid" to classId,
-                                    ),
-                                ),
-                        ),
-                    )
-
-                val attendanceJson = result.objectOrObjectValue("attendance", "Attendance", "data", "result")
-                val attendance = json.decodeFromJsonElement(AttendanceResponse.serializer(), attendanceJson)
+                val attendance = fetchAttendance(admno, brId, classId, year)
                 cacheStore.store(cacheKey, attendance, AttendanceResponse.serializer())
                 attendance
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 cacheStore.cachedAnyAge(cacheKey, AttendanceResponse.serializer())
                     ?: throw e
@@ -229,31 +290,75 @@ class AttendanceRepository
                 cacheStore.cached(cacheKey, CachePolicy.DAYWISE, DaywiseResponse.serializer())?.let { return it }
             }
 
+            val daywise = fetchDaywise(admno, brId, year, fromDate, toDate)
+            cacheStore.store(cacheKey, daywise, DaywiseResponse.serializer())
+            return daywise
+        }
+
+        private suspend fun fetchAttendance(
+            admno: String,
+            brId: Int,
+            classId: String,
+            year: String,
+            clientId: String = Tenants.GU.clientCode,
+        ): AttendanceResponse {
             authRepository.refreshTokenIfNeeded()
             val result =
                 studentApi.parseStudentResponse(
                     studentApi.requireBody(
-                        endpoint = "getDaywiseAttendance",
+                        endpoint = "getAttendance",
                         response =
                             api.postAttendance(
                                 studentApi.jsonBody(
                                     "from" to "app",
-                                    "method" to "GetDailyReport",
+                                    "method" to "GetCourseWiseReport",
                                     "admno" to admno,
-                                    "client" to Tenants.GU.clientCode,
+                                    "client" to clientId,
                                     "branch_id" to brId,
                                     "year" to year,
-                                    "from_date" to fromDate,
-                                    "to_date" to toDate,
+                                    "curyear" to year,
+                                    "classid" to classId,
                                 ),
                             ),
                     ),
                 )
+            return json.decodeFromJsonElement(
+                AttendanceResponse.serializer(),
+                result.objectOrObjectValue("attendance", "Attendance", "data", "result"),
+            )
+        }
 
-            val daywiseJson = result.objectOrObjectValue("daywise", "Daywise", "data", "result")
-            val daywise = json.decodeFromJsonElement(DaywiseResponse.serializer(), daywiseJson)
-            cacheStore.store(cacheKey, daywise, DaywiseResponse.serializer())
-            return daywise
+        private suspend fun fetchDaywise(
+            admno: String,
+            brId: Int,
+            year: String,
+            fromDate: String,
+            toDate: String,
+            clientId: String = Tenants.GU.clientCode,
+        ): DaywiseResponse {
+            authRepository.refreshTokenIfNeeded()
+            val result =
+                studentApi.parseStudentResponse(
+                    studentApi.requireBody(
+                        "getDaywiseAttendance",
+                        api.postAttendance(
+                            studentApi.jsonBody(
+                                "from" to "app",
+                                "method" to "GetDailyReport",
+                                "admno" to admno,
+                                "client" to clientId,
+                                "branch_id" to brId,
+                                "year" to year,
+                                "from_date" to fromDate,
+                                "to_date" to toDate,
+                            ),
+                        ),
+                    ),
+                )
+            return json.decodeFromJsonElement(
+                DaywiseResponse.serializer(),
+                result.objectOrObjectValue("daywise", "Daywise", "data", "result"),
+            )
         }
 
         suspend fun getAttendanceQrTemp(admno: String): QrScanResult {
@@ -311,6 +416,15 @@ class AttendanceRepository
         }
 
         suspend fun clearCache() {
-            cacheStore.clear()
+            daily.deactivate()
+            summary.clearCache { cacheStore.clear() }
         }
     }
+
+data class AttendanceKey(val context: StudentRequestContext, val classId: String, val year: String) {
+    val cacheKey: String = "v4_attendance_${context.admno}_${context.brId}_${context.clientId}_${year}_$classId"
+}
+
+data class DaywiseKey(val context: StudentRequestContext, val year: String, val fromDate: String, val toDate: String) {
+    val cacheKey: String = "v4_daywise_${context.admno}_${context.brId}_${context.clientId}_${year}_${fromDate}_$toDate"
+}
