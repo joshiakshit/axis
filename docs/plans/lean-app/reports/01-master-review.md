@@ -1,6 +1,6 @@
 # Wave 1 master review
 
-Date: 2026-09-24. Wave 2 is blocked pending the data correction pass.
+Date: 2026-09-24. Initial review retained below. The correction pass and integrated checks are now recorded in [the wave 2 baseline](00-wave2-baseline.md). Its launch status supersedes the initial block here.
 
 ## Reviewed revisions
 
