@@ -2,7 +2,7 @@ package com.ash.axis.data.repository
 
 import com.ash.axis.data.api.ICloudEmsApi
 import com.ash.axis.data.db.CacheDao
-import com.ash.axis.data.db.CacheEntity
+import com.ash.axis.data.db.JsonCache
 import com.ash.axis.domain.model.AdmitCardEntry
 import com.ash.axis.domain.model.CourseMarks
 import com.ash.axis.domain.model.ExamSession
@@ -11,8 +11,8 @@ import com.ash.axis.domain.model.PerformanceData
 import com.ash.axis.domain.model.PerformanceOption
 import com.ash.axis.domain.model.PerformanceSetup
 import com.ash.axis.tenant.Tenants
-import com.ash.core.storage.CacheFreshness
 import com.ash.core.storage.CachePolicy
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -37,6 +37,8 @@ class GradesRepository
         private val authRepository: AuthRepository,
         private val json: Json,
     ) {
+        private val cache = JsonCache(cacheDao, json)
+
         data class SemesterResult(
             val semesters: List<String>,
             val maxSemFromClasses: Int?,
@@ -56,24 +58,16 @@ class GradesRepository
         ): SemesterResult {
             val cacheKey = "v2_grade_semesters_${admno}_${classId}_$academicYear"
             if (!forceRefresh) {
-                cachedStringList(cacheKey)?.let {
+                cache.readAccepted(cacheKey, stringListSerializer, CachePolicy.ATTENDANCE)?.data?.let {
                     return SemesterResult(semesters = it, maxSemFromClasses = null)
                 }
             }
 
             authRepository.refreshTokenIfNeeded()
             val body =
-                MultipartBody.Builder()
-                    .setType(MultipartBody.FORM)
-                    .addFormDataPart("from", "app")
-                    .addFormDataPart("method", "showSemester")
-                    .addFormDataPart("user_id", admno)
-                    .addFormDataPart("br_id", brId.toString())
-                    .addFormDataPart("client", Tenants.GU.clientCode)
+                reportCardForm(admno, brId, "showSemester")
                     .addFormDataPart("student_class", classId)
                     .addFormDataPart("current_acad_yr", academicYear)
-                    .addFormDataPart("source", "")
-                    .addFormDataPart("admnum", admno)
                     .build()
 
             val response = api.postReportCardController(body)
@@ -81,7 +75,7 @@ class GradesRepository
             val obj = result.jsonObject
             val semesters = parseSemesterNumbers(obj)
             val maxSem = parseMaxSemFromClasses(obj)
-            storeStringList(cacheKey, semesters)
+            cache.write(cacheKey, semesters, stringListSerializer)
             return SemesterResult(semesters = semesters, maxSemFromClasses = maxSem)
         }
 
@@ -93,28 +87,20 @@ class GradesRepository
         ): List<ExamSession> {
             val cacheKey = "v2_grade_sessions_${admno}_$semesterNumeric"
             if (!forceRefresh) {
-                cachedSessions(cacheKey)?.let { return it }
+                cache.readAccepted(cacheKey, sessionsSerializer, CachePolicy.ATTENDANCE)?.data?.let { return it }
             }
 
             authRepository.refreshTokenIfNeeded()
             val body =
-                MultipartBody.Builder()
-                    .setType(MultipartBody.FORM)
-                    .addFormDataPart("from", "app")
-                    .addFormDataPart("method", "showSession")
-                    .addFormDataPart("user_id", admno)
-                    .addFormDataPart("br_id", brId.toString())
-                    .addFormDataPart("client", Tenants.GU.clientCode)
+                reportCardForm(admno, brId, "showSession")
                     .addFormDataPart("semesterNumeric", semesterNumeric)
-                    .addFormDataPart("source", "")
-                    .addFormDataPart("admnum", admno)
                     .build()
 
             val response = api.postReportCardController(body)
             val result = parseResponse("showSession", requireBody("reportCardController/showSession", response))
             val obj = result.jsonObject
             return parseExamSessions(obj).also { sessions ->
-                storeSessions(cacheKey, sessions)
+                cache.write(cacheKey, sessions, sessionsSerializer)
             }
         }
 
@@ -127,22 +113,12 @@ class GradesRepository
         ): GradesData {
             val cacheKey = "v2_grades_${admno}_${sessionId}_${semesters.joinToString(",")}"
             if (!forceRefresh) {
-                cached(cacheKey)?.let { return it }
+                cache.readAccepted(cacheKey, GradesData.serializer(), CachePolicy.ATTENDANCE)?.data?.let { return it }
             }
 
             return try {
                 authRepository.refreshTokenIfNeeded()
-                val bodyBuilder =
-                    MultipartBody.Builder()
-                        .setType(MultipartBody.FORM)
-                        .addFormDataPart("from", "app")
-                        .addFormDataPart("method", "SubmitForm")
-                        .addFormDataPart("user_id", admno)
-                        .addFormDataPart("br_id", brId.toString())
-                        .addFormDataPart("client", Tenants.GU.clientCode)
-                        .addFormDataPart("exam_session", sessionId)
-                        .addFormDataPart("source", "")
-                        .addFormDataPart("admnum", admno)
+                val bodyBuilder = reportCardForm(admno, brId, "SubmitForm").addFormDataPart("exam_session", sessionId)
 
                 semesters.forEach { sem ->
                     bodyBuilder.addFormDataPart("semesterNumeric[]", sem)
@@ -151,10 +127,12 @@ class GradesRepository
                 val response = api.postReportCardController(bodyBuilder.build())
                 val result = parseResponse("SubmitForm", requireBody("reportCardController/SubmitForm", response))
                 val data = parseGradesData(result)
-                store(cacheKey, data)
+                cache.write(cacheKey, data, GradesData.serializer())
                 data
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                cachedAnyAge(cacheKey) ?: throw e
+                cache.read(cacheKey, GradesData.serializer(), CachePolicy.ATTENDANCE)?.data ?: throw e
             }
         }
 
@@ -290,7 +268,9 @@ class GradesRepository
             val cacheKey =
                 "v5_perf_marks_${admno}_${academicYear}_${semester}_${examSession}_${classId}_${division}_${examIds.joinToString("-")}"
             if (!forceRefresh) {
-                cachedPerformance(cacheKey)?.let { return it.courses }
+                cache.readAccepted(cacheKey, PerformanceData.serializer(), CachePolicy.ATTENDANCE)?.data?.let {
+                    return it.courses
+                }
             }
 
             val result =
@@ -310,7 +290,7 @@ class GradesRepository
                         ),
                 )
             val data = PerformanceData(courses = parseAcademicPerformanceMarks(result))
-            storePerformance(cacheKey, data)
+            cache.write(cacheKey, data, PerformanceData.serializer())
             return data.courses
         }
 
@@ -321,14 +301,7 @@ class GradesRepository
         ): List<AdmitCardEntry> {
             val cacheKey = "v1_admit_card_$admno"
             if (!forceRefresh) {
-                val entry = cacheDao.get(cacheKey)
-                if (entry != null) {
-                    val freshness = CachePolicy.ATTENDANCE.evaluate(entry.cachedAt)
-                    if (freshness != CacheFreshness.EXPIRED) {
-                        return runCatching { json.decodeFromString(admitCardSerializer, entry.data) }
-                            .getOrDefault(emptyList())
-                    }
-                }
+                cache.readAccepted(cacheKey, admitCardSerializer, CachePolicy.ATTENDANCE)?.data?.let { return it }
             }
 
             authRepository.refreshTokenIfNeeded()
@@ -347,22 +320,12 @@ class GradesRepository
                 val response = api.postAdmitCard(body)
                 val result = parseResponse("admitCard", requireBody("admitCard", response))
                 val entries = parseAdmitCardEntries(result)
-                cacheDao.put(
-                    CacheEntity(
-                        key = cacheKey,
-                        data = json.encodeToString(admitCardSerializer, entries),
-                        cachedAt = System.currentTimeMillis(),
-                    ),
-                )
+                cache.write(cacheKey, entries, admitCardSerializer)
                 entries
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                val entry = cacheDao.get(cacheKey)
-                if (entry != null) {
-                    runCatching { json.decodeFromString(admitCardSerializer, entry.data) }
-                        .getOrDefault(emptyList())
-                } else {
-                    throw e
-                }
+                cache.read(cacheKey, admitCardSerializer, CachePolicy.ATTENDANCE)?.data ?: throw e
             }
         }
 
@@ -386,6 +349,20 @@ class GradesRepository
                 )
             }
         }
+
+        private fun reportCardForm(
+            admno: String,
+            brId: Int,
+            method: String,
+        ) = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("from", "app")
+            .addFormDataPart("method", method)
+            .addFormDataPart("user_id", admno)
+            .addFormDataPart("br_id", brId.toString())
+            .addFormDataPart("client", Tenants.GU.clientCode)
+            .addFormDataPart("source", "")
+            .addFormDataPart("admnum", admno)
 
         // Field names vary across PHP backend releases.
         private fun JsonObject.firstString(vararg keys: String): String {
@@ -487,107 +464,6 @@ class GradesRepository
             val errorBody = response.errorBody()?.string()?.trim()?.take(200)
             if (code == 401) throw SessionExpiredException()
             throw IcloudServerException(code, "$endpoint failed: HTTP $code${errorBody?.let { ": $it" }.orEmpty()}")
-        }
-
-        private suspend fun cached(key: String): GradesData? {
-            val entry = cacheDao.get(key) ?: return null
-            if (CachePolicy.ATTENDANCE.evaluate(entry.cachedAt) == CacheFreshness.EXPIRED) return null
-            return try {
-                json.decodeFromString(GradesData.serializer(), entry.data)
-            } catch (_: Exception) {
-                null
-            }
-        }
-
-        private suspend fun cachedAnyAge(key: String): GradesData? {
-            val entry = cacheDao.get(key) ?: return null
-            return try {
-                json.decodeFromString(GradesData.serializer(), entry.data)
-            } catch (_: Exception) {
-                null
-            }
-        }
-
-        private suspend fun store(
-            key: String,
-            data: GradesData,
-        ) {
-            cacheDao.put(
-                CacheEntity(
-                    key = key,
-                    data = json.encodeToString(GradesData.serializer(), data),
-                    cachedAt = System.currentTimeMillis(),
-                ),
-            )
-        }
-
-        private suspend fun cachedSessions(key: String): List<ExamSession>? {
-            val entry = cacheDao.get(key) ?: return null
-            if (CachePolicy.ATTENDANCE.evaluate(entry.cachedAt) == CacheFreshness.EXPIRED) return null
-            return try {
-                json.decodeFromString(sessionsSerializer, entry.data)
-            } catch (_: Exception) {
-                null
-            }
-        }
-
-        private suspend fun storeSessions(
-            key: String,
-            sessions: List<ExamSession>,
-        ) {
-            cacheDao.put(
-                CacheEntity(
-                    key = key,
-                    data = json.encodeToString(sessionsSerializer, sessions),
-                    cachedAt = System.currentTimeMillis(),
-                ),
-            )
-        }
-
-        private suspend fun cachedStringList(key: String): List<String>? {
-            val entry = cacheDao.get(key) ?: return null
-            if (CachePolicy.ATTENDANCE.evaluate(entry.cachedAt) == CacheFreshness.EXPIRED) return null
-            return try {
-                json.decodeFromString(stringListSerializer, entry.data)
-            } catch (_: Exception) {
-                null
-            }
-        }
-
-        private suspend fun storeStringList(
-            key: String,
-            list: List<String>,
-        ) {
-            cacheDao.put(
-                CacheEntity(
-                    key = key,
-                    data = json.encodeToString(stringListSerializer, list),
-                    cachedAt = System.currentTimeMillis(),
-                ),
-            )
-        }
-
-        private suspend fun cachedPerformance(key: String): PerformanceData? {
-            val entry = cacheDao.get(key) ?: return null
-            if (CachePolicy.ATTENDANCE.evaluate(entry.cachedAt) == CacheFreshness.EXPIRED) return null
-            return try {
-                json.decodeFromString(PerformanceData.serializer(), entry.data)
-            } catch (_: Exception) {
-                null
-            }
-        }
-
-        private suspend fun storePerformance(
-            key: String,
-            data: PerformanceData,
-        ) {
-            cacheDao.put(
-                CacheEntity(
-                    key = key,
-                    data = json.encodeToString(PerformanceData.serializer(), data),
-                    cachedAt = System.currentTimeMillis(),
-                ),
-            )
         }
 
         private companion object {
