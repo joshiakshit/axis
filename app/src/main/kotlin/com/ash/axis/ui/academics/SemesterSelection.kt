@@ -5,6 +5,7 @@ import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.SELECTED_SEMESTER_CLASS_KEY
 import com.ash.axis.data.repository.SELECTED_SEMESTER_YEAR_KEY
 import com.ash.axis.domain.model.SemesterOption
+import com.ash.axis.domain.model.StudentRequestContext
 import com.ash.core.storage.PreferencesStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
@@ -14,6 +15,12 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 
+internal data class SemesterSelection(
+    val context: StudentRequestContext? = null,
+    val option: SemesterOption? = null,
+    val error: Throwable? = null,
+)
+
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @Suppress("TooGenericExceptionCaught")
 internal fun selectedSemester(
@@ -21,30 +28,33 @@ internal fun selectedSemester(
     attendance: AttendanceRepository,
     preferences: PreferencesStore,
     resolveLabel: Boolean = false,
-): Flow<SemesterOption?> =
+    retry: Flow<Long> = flowOf(0L),
+): Flow<SemesterSelection> =
     coordinator.activeContext.flatMapLatest { context ->
         if (context == null) {
-            flowOf(null)
+            flowOf(SemesterSelection())
         } else {
             combine(
                 preferences.getUserString(SELECTED_SEMESTER_YEAR_KEY),
                 preferences.getUserString(SELECTED_SEMESTER_CLASS_KEY),
-            ) { year, classId -> year to classId }
+                retry,
+            ) { year, classId, attempt -> Triple(year, classId, attempt) }
                 .distinctUntilChanged()
                 .flatMapLatest { (year, classId) ->
                     flow {
-                        if (year.isNotBlank() && classId.isNotBlank()) emit(SemesterOption(year, classId, ""))
+                        val saved = if (year.isNotBlank() && classId.isNotBlank()) SemesterOption(year, classId, "") else null
+                        emit(SemesterSelection(context, saved))
                         if (!resolveLabel && year.isNotBlank() && classId.isNotBlank()) return@flow
                         val resolved =
                             try {
-                                attendance.getPreferredSemester(context.admno, context.brId, year, classId)
+                                val resolved = attendance.getPreferredSemester(context.admno, context.brId, year, classId)
+                                SemesterSelection(context, resolved)
                             } catch (error: CancellationException) {
                                 throw error
                             } catch (error: Exception) {
-                                if (year.isBlank() || classId.isBlank()) throw error
-                                null
+                                SemesterSelection(context, saved, error)
                             }
-                        if (resolved != null) emit(resolved)
+                        emit(resolved)
                     }
                 }
         }

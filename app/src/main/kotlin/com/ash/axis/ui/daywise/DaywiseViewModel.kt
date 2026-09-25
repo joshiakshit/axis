@@ -9,6 +9,7 @@ import com.ash.axis.data.repository.DaywiseKey
 import com.ash.axis.domain.model.DaywiseResponse
 import com.ash.axis.domain.model.DaywiseSlot
 import com.ash.axis.ui.ErrorText
+import com.ash.axis.ui.academics.SemesterSelection
 import com.ash.axis.ui.academics.selectedSemester
 import com.ash.core.network.NetworkMonitor
 import com.ash.core.storage.PreferencesStore
@@ -24,6 +25,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -50,6 +52,7 @@ data class DaywiseUiState(
     val lastUpdated: Long? = null,
     val isOffline: Boolean = false,
     val hasData: Boolean = false,
+    val semesterError: String? = null,
 )
 
 @HiltViewModel
@@ -66,8 +69,10 @@ class DaywiseViewModel
         val state: StateFlow<DaywiseUiState> = _state.asStateFlow()
         private val dateFmt = DateTimeFormatter.ISO_LOCAL_DATE
         private val monthFmt = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.ENGLISH)
-        private val semester = selectedSemester(coordinator, attendanceRepo, preferencesStore)
-        private val selectedSemesterState = MutableStateFlow<com.ash.axis.domain.model.SemesterOption?>(null)
+        private val semesterRetry = MutableStateFlow(0L)
+        private val semester = selectedSemester(coordinator, attendanceRepo, preferencesStore, retry = semesterRetry)
+        private val selectedSemesterState = MutableStateFlow(SemesterSelection())
+        private val manualError = MutableStateFlow<Throwable?>(null)
         private val visible = MutableStateFlow(false)
 
         init {
@@ -86,50 +91,66 @@ class DaywiseViewModel
                 }
             }
             viewModelScope.launch {
-                semester.collect {
-                    selectedSemesterState.value = it
-                    if (visible.value) demand()
+                semester.collect { selection ->
+                    val previous = selectedSemesterState.value
+                    selectedSemesterState.value = selection
+                    if (selection.context != previous.context ||
+                        selection.option?.yearId != previous.option?.yearId
+                    ) {
+                        _state.update {
+                            it.copy(days = persistentListOf(), hasData = false, lastUpdated = null, isLoading = true, error = null)
+                        }
+                    }
+                    if (visible.value && selection.option != previous.option) demand()
                 }
             }
             viewModelScope.launch {
-                combine(coordinator.activeContext, selectedSemesterState, _state) { context, option, screen ->
-                    if (context == null || option == null) {
-                        null
-                    } else {
-                        DaywiseKey(context, option.yearId, screen.monthStart.format(dateFmt), screen.monthEnd.format(dateFmt))
+                val binding =
+                    combine(coordinator.activeContext, selectedSemesterState, _state) { context, selection, screen ->
+                        val option = selection.option
+                        if (context == null || selection.context != context || option == null) {
+                            (if (selection.context == context) selection else SemesterSelection(context)) to null
+                        } else {
+                            selection to
+                                DaywiseKey(context, option.yearId, screen.monthStart.format(dateFmt), screen.monthEnd.format(dateFmt))
+                        }
+                    }.distinctUntilChanged().flatMapLatest { key ->
+                        if (key.second == null) {
+                            flowOf(key.first to AcademicSnapshot<DaywiseResponse>())
+                        } else {
+                            attendanceRepo.observeDaywise(key.second!!).map { key.first to it }
+                        }
                     }
-                }.distinctUntilChanged().flatMapLatest { key ->
-                    if (key == null) {
-                        flowOf(AcademicSnapshot<DaywiseResponse>())
-                    } else {
-                        attendanceRepo.observeDaywise(key)
-                    }
+                combine(binding, coordinator.daywiseDemandError, manualError) { selected, demand, manual ->
+                    DaywisePresentation(selected.first, selected.second, demand, manual)
                 }.collect { applySnapshot(it) }
-            }
-            viewModelScope.launch {
-                coordinator.daywiseDemandError.collect { error ->
-                    if (error != null) _state.update { it.copy(isLoading = false, error = ErrorText.forData(error)) }
-                }
             }
             viewModelScope.launch { networkMonitor.isOnline.collect { online -> _state.update { it.copy(isOffline = !online) } } }
         }
 
         fun onPageVisibilityChanged(isVisible: Boolean) {
             visible.value = isVisible
-            if (isVisible) demand()
+            if (isVisible) {
+                if (_state.value.semesterError != null) semesterRetry.value++ else demand()
+            }
         }
 
         @Suppress("TooGenericExceptionCaught")
         fun refresh() {
-            val option = selectedSemesterState.value ?: return
+            val option = selectedSemesterState.value.option
+            if (option == null) {
+                semesterRetry.value++
+                return
+            }
             val screen = _state.value
             viewModelScope.launch {
+                manualError.value = null
                 try {
                     coordinator.refreshDaywise(option.yearId, screen.monthStart.format(dateFmt), screen.monthEnd.format(dateFmt))
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
-                    _state.update { it.copy(isLoading = false, isRefreshing = false, error = ErrorText.forData(error)) }
+                    manualError.value = error
                 }
             }
         }
@@ -146,8 +167,9 @@ class DaywiseViewModel
         }
 
         private fun demand() {
-            val option = selectedSemesterState.value ?: return
-            if (!visible.value || coordinator.activeContext.value == null) return
+            val selection = selectedSemesterState.value
+            val option = selection.option ?: return
+            if (!visible.value || coordinator.activeContext.value != selection.context) return
             val screen = _state.value
             viewModelScope.launch {
                 coordinator.daywiseVisible(option.yearId, screen.monthStart.format(dateFmt), screen.monthEnd.format(dateFmt))
@@ -168,22 +190,28 @@ class DaywiseViewModel
                     selectedDate = selectedDate.coerceIn(start, end),
                     days = persistentListOf(),
                     hasData = false,
+                    lastUpdated = null,
                     isLoading = true,
+                    isRefreshing = false,
                     error = null,
                 )
             }
         }
 
-        private fun applySnapshot(snapshot: AcademicSnapshot<DaywiseResponse>) {
+        private fun applySnapshot(presentation: DaywisePresentation) {
+            val snapshot = presentation.snapshot
+            val error = presentation.selection.error ?: snapshot.error ?: presentation.demandError ?: presentation.manualError
+            val message = error?.let(ErrorText::forData)
             val response = snapshot.data
             if (response == null) {
                 _state.update {
                     it.copy(
                         days = persistentListOf(),
                         hasData = false,
-                        isLoading = snapshot.error == null,
+                        isLoading = error == null,
                         isRefreshing = snapshot.refreshing,
-                        error = snapshot.error?.let(ErrorText::forData),
+                        error = message,
+                        semesterError = presentation.selection.error?.let(ErrorText::forData),
                         lastUpdated = null,
                     )
                 }
@@ -206,11 +234,19 @@ class DaywiseViewModel
                 it.copy(
                     isLoading = false,
                     isRefreshing = snapshot.refreshing,
-                    error = snapshot.error?.let(ErrorText::forData),
+                    error = message,
+                    semesterError = presentation.selection.error?.let(ErrorText::forData),
                     days = days,
                     lastUpdated = snapshot.updatedAtMillis,
                     hasData = true,
                 )
             }
         }
+
+        private data class DaywisePresentation(
+            val selection: SemesterSelection,
+            val snapshot: AcademicSnapshot<DaywiseResponse>,
+            val demandError: Throwable?,
+            val manualError: Throwable?,
+        )
     }

@@ -46,8 +46,11 @@ class DashboardViewModelTest {
                 val context = MutableStateFlow<StudentRequestContext?>(account)
                 val summary = MutableStateFlow(AcademicSnapshot<AttendanceResponse>())
                 val nextAccountSummary = MutableStateFlow(AcademicSnapshot<AttendanceResponse>())
+                val nextKey = CompletableDeferred<kotlinx.coroutines.flow.StateFlow<AcademicSnapshot<AttendanceResponse>>>()
                 val week = MutableStateFlow(AcademicSnapshot<TimetableData>())
                 val threshold = MutableStateFlow(75)
+                val year = MutableStateFlow("Y1")
+                val classId = MutableStateFlow("C1")
                 val attendance = mockk<AttendanceRepository>()
                 val timetable = mockk<TimetableRepository>()
                 val coordinator = mockk<AcademicDataCoordinator>()
@@ -61,8 +64,8 @@ class DashboardViewModelTest {
                 every { auth.getUserInfo() } returns UserInfo("A", 1, "Alex", "", "", "Client")
                 every { preferences.getUserString(any(), any()) } answers {
                     when (firstArg<String>()) {
-                        "selected_semester_year_id" -> flowOf("Y1")
-                        "selected_semester_class_id" -> flowOf("C1")
+                        "selected_semester_year_id" -> year
+                        "selected_semester_class_id" -> classId
                         else -> flowOf("")
                     }
                 }
@@ -70,7 +73,12 @@ class DashboardViewModelTest {
                 every { network.isOnline } returns flowOf(true)
                 coEvery { attendance.getPreferredSemester(any(), any(), any(), any(), any()) } coAnswers { pending.await() }
                 coEvery { attendance.observeSummary(any()) } coAnswers {
-                    if (firstArg<AttendanceKey>().context.admno == "A") summary else nextAccountSummary
+                    val key = firstArg<AttendanceKey>()
+                    when {
+                        key.context.admno != "A" -> nextAccountSummary
+                        key.year == "Y2" -> nextKey.await()
+                        else -> summary
+                    }
                 }
                 coEvery { timetable.observeWeek(any()) } returns week
                 coEvery { coordinator.homeVisible() } returns Unit
@@ -106,11 +114,19 @@ class DashboardViewModelTest {
                 coVerify(exactly = 1) { coordinator.refreshAttendance() }
                 coVerify(exactly = 1) { coordinator.refreshTimetable() }
 
+                year.value = "Y2"
+                classId.value = "C2"
+                runCurrent()
+                assertFalse(viewModel.state.value.hasAttendance)
+                assertEquals(0.0, viewModel.state.value.overallPercent)
+                nextKey.complete(nextAccountSummary)
+                runCurrent()
+
                 context.value = StudentRequestContext("B", 1, "Client", "2026")
                 runCurrent()
                 assertFalse(viewModel.state.value.hasAttendance)
                 assertEquals(0.0, viewModel.state.value.overallPercent)
-                coVerify { attendance.observeSummary(AttendanceKey(context.value!!, "C1", "Y1")) }
+                coVerify { attendance.observeSummary(AttendanceKey(context.value!!, "C2", "Y2")) }
             } finally {
                 Dispatchers.resetMain()
             }

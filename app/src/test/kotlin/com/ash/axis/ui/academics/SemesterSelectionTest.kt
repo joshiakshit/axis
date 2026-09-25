@@ -33,7 +33,7 @@ class SemesterSelectionTest {
             every { preferences.getUserString(SELECTED_SEMESTER_YEAR_KEY, any()) } returns year
             every { preferences.getUserString(SELECTED_SEMESTER_CLASS_KEY, any()) } returns classId
             val values = mutableListOf<SemesterOption?>()
-            val job = backgroundScope.launch { selectedSemester(coordinator, attendance, preferences).collect(values::add) }
+            val job = backgroundScope.launch { selectedSemester(coordinator, attendance, preferences).collect { values.add(it.option) } }
 
             runCurrent()
             assertEquals(SemesterOption("Y1", "C1", ""), values.last())

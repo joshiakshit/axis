@@ -50,6 +50,7 @@ class DashboardReviewTest {
                 assertNull(viewModel.state.value.attendanceError)
             } finally {
                 viewModel.viewModelScope.cancel()
+                runCurrent()
                 Dispatchers.resetMain()
             }
         }
@@ -64,6 +65,7 @@ class DashboardReviewTest {
                 assertEquals("semester offline", viewModel.state.value.attendanceError)
             } finally {
                 viewModel.viewModelScope.cancel()
+                runCurrent()
                 Dispatchers.resetMain()
             }
         }
@@ -91,8 +93,14 @@ class DashboardReviewTest {
         coEvery { attendance.getPreferredSemester(any(), any(), any(), any(), any()) } throws
             IllegalStateException("semester offline")
         return DashboardViewModel(
-            attendance, mockk<TimetableRepository>(), coordinator, auth,
-            AttendanceUseCase(), TimetableUseCase(), preferences, network,
+            attendance,
+            mockk<TimetableRepository>(),
+            coordinator,
+            auth,
+            AttendanceUseCase(),
+            TimetableUseCase(),
+            preferences,
+            network,
         )
     }
 }
