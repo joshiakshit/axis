@@ -2,7 +2,7 @@
 
 Reviewed submissions: `9603ce2f9df7999a28d54cedb387df917f9a5406` (04) and `feb453638aeac6ec285c49e2dd11b106b7f0e1e9` (05).
 
-Initial decision: return both for focused corrections. The original submissions were combined only in `C:/Coding/Axis/axis-lean-wave2-review`, branch `joshi/lean-wave2-review`. The updates below supersede that decision for agents 04 and 05 at the consumer correction stage. This review does not assess assignment 03.
+Initial decision: return both for focused corrections. The original submissions were combined only in `C:/Coding/Axis/axis-lean-wave2-review`, branch `joshi/lean-wave2-review`. The updates below supersede that decision for agents 04 and 05 at the consumer correction stage. All three wave 2 assignments are now integrated and the full gate passes; see [the wave 3 baseline](00-wave3-baseline.md). Open shared API and validation items below remain assigned to agent 06.
 
 ## Agent 05 correction acceptance, 2026-09-25
 

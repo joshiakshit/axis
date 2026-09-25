@@ -2,7 +2,7 @@
 
 Reviewed on 2026-09-25. Submission: `de411944e539d707d5581ce2788ba540e0d746e5` on `joshi/lean-03-grades`.
 
-Decision: return for two focused request-state corrections. Grades is not integrated yet. Agents 04 and 05 remain integrated. Do not issue the agent 06 launch baseline until these corrections are reviewed and the integrated baseline gate passes.
+Current decision: corrections accepted at `c6a54c495c7b0b3ccfdb69244e122b7c6b0eec25` and integrated. The supplied assertions remain intact, with new tests for late marks failure and superseded PDF completion. The complete integrated gate passes; see [the wave 3 baseline](00-wave3-baseline.md). The initial failed-test evidence and correction assignment below are retained as history.
 
 ## Evidence
 

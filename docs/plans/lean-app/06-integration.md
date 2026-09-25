@@ -1,6 +1,6 @@
 # Agent 06: lifecycle integration and final cleanup
 
-Run alone in wave 3 after the master integrates all five preceding assignments. Read README.md, CONTRACT.md, and reports 01-05. Do not reopen settled architecture choices without evidence of a defect.
+Run alone in wave 3 after the master integrates all five preceding assignments. Read README.md, CONTRACT.md, reports/00-wave3-baseline.md, and reports 01-05. Follow the current acceptance updates in the master reviews. Do not reopen settled architecture choices without evidence of a defect.
 
 ## Objective
 
