@@ -2,7 +2,16 @@
 
 Reviewed submissions: `9603ce2f9df7999a28d54cedb387df917f9a5406` (04) and `feb453638aeac6ec285c49e2dd11b106b7f0e1e9` (05).
 
-Decision: return both for focused corrections. They are combined only in `C:/Coding/Axis/axis-lean-wave2-review`, branch `joshi/lean-wave2-review`. Neither submission is accepted on `joshi/lean-integration` yet. This review does not assess assignment 03.
+Initial decision: return both for focused corrections. The original submissions were combined only in `C:/Coding/Axis/axis-lean-wave2-review`, branch `joshi/lean-wave2-review`. The update below supersedes that decision for agent 04. This review does not assess assignment 03.
+
+## Agent 04 correction acceptance, 2026-09-25
+
+- Reviewed final submission: `402537cf9ae289636569fe75da2d046d3bf50326`. Both supplied Home assertions are unchanged; added coroutine cleanup and formatting do not weaken them.
+- Accepted for staged integration. Cherry-picked the six assignment commits onto `joshi/lean-integration`, ending at `e33a4db2e29907123c0b96b47f4865087d39840d` before this documentation update.
+- Verified on the integration branch: `:app:testDebugUnitTest` filtered to `com.ash.axis.ui.academics.*`, `com.ash.axis.ui.attendance.*`, `com.ash.axis.ui.dashboard.*`, and `com.ash.axis.ui.daywise.*`, followed by `:app:compileDebugKotlin :app:ktlintCheck :app:detekt`. All passed: 10 tests, no failures or skips. `git diff --check` passed.
+- The original metadata-error escape and stale cleared-demand-error regressions are resolved. Overall and Day-wise tests cover metadata retry and current error presentation.
+- This is consumer correction acceptance, not completed lifecycle acceptance. Agent 06 must still replace temporary selection discovery with shared selection state and validate account-bound error lifetime. In particular, local manual-refresh errors are not consistently cleared on every key transition, and coordinator demand errors are not keyed. An old pending refresh must not publish an error into a new account, semester, or range. Cover these cases while closing the shared selection/error contract; do not retain duplicate error state solely for compatibility.
+- Agent 05 corrections and agent 03 still need master review before a wave 3 launch baseline is issued. Original wave 2 baseline remains unchanged. Device and performance checks remain open.
 
 ## Reproduction
 
