@@ -58,6 +58,7 @@ class GradesViewModel
             resultJob?.cancel()
             pdfJob?.cancel()
             ++pdfGeneration
+            _state.update { it.copy(isLoadingPdf = false) }
             val generation = ++resultGeneration
             resultJob = viewModelScope.launch { block(generation) }
         }
@@ -120,6 +121,8 @@ class GradesViewModel
         }
 
         fun togglePerformanceExam(exam: String) {
+            performanceJob?.cancel()
+            ++performanceGeneration
             _state.update {
                 val exams =
                     if (exam in it.selectedPerformanceExams) {
@@ -130,6 +133,9 @@ class GradesViewModel
                 it.copy(
                     selectedPerformanceExams = exams,
                     courses = emptyList(),
+                    performanceLoading = false,
+                    isLoading = false,
+                    isRefreshing = false,
                     performanceError = null,
                 )
             }

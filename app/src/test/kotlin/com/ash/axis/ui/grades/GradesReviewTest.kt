@@ -85,6 +85,37 @@ class GradesReviewTest {
         }
 
     @Test
+    fun `changing exam chips rejects a late marks failure`() =
+        runTest(dispatcher) {
+            val pending = CompletableDeferred<Unit>()
+            coEvery { repository.getPerformanceMarks(any(), any(), any(), any(), any(), any(), any(), any(), any()) } coAnswers {
+                withContext(NonCancellable) {
+                    pending.await()
+                    error("Old selection failed")
+                }
+            }
+            val viewModel = viewModel()
+            try {
+                runCurrent()
+                viewModel.togglePerformanceExam("first")
+                viewModel.applyPerformanceExams()
+                runCurrent()
+
+                viewModel.togglePerformanceExam("second")
+                pending.complete(Unit)
+                runCurrent()
+
+                assertEquals(listOf("first", "second"), viewModel.state.value.selectedPerformanceExams)
+                assertEquals(null, viewModel.state.value.performanceError)
+                assertFalse(viewModel.state.value.performanceLoading)
+            } finally {
+                pending.complete(Unit)
+                viewModel.viewModelScope.cancel()
+                runCurrent()
+            }
+        }
+
+    @Test
     fun `changing result while a pdf loads clears obsolete loading state`() =
         runTest(dispatcher) {
             coEvery { repository.getGrades(any(), any(), any(), any(), any()) } returns
@@ -110,6 +141,48 @@ class GradesReviewTest {
                 assertEquals("second", viewModel.state.value.selectedSessionId)
                 assertFalse(viewModel.state.value.isLoadingPdf)
             } finally {
+                viewModel.viewModelScope.cancel()
+                runCurrent()
+            }
+        }
+
+    @Test
+    fun `late old pdf completion does not clear newer pdf loading state`() =
+        runTest(dispatcher) {
+            coEvery { repository.getGrades(any(), any(), any(), any(), any()) } returns
+                GradesData(
+                    reportCards = listOf(ReportCardEntry(id = "card")),
+                    marksheetType = "marksheet",
+                    subExamTypeAA = "exam",
+                )
+            val first = CompletableDeferred<ByteArray>()
+            val second = CompletableDeferred<ByteArray>()
+            var calls = 0
+            coEvery { repository.getReportCardPdf(any(), any(), any(), any(), any(), any()) } coAnswers {
+                if (++calls == 1) withContext(NonCancellable) { first.await() } else second.await()
+            }
+            val viewModel = viewModel()
+            try {
+                runCurrent()
+                viewModel.selectSession("first")
+                runCurrent()
+                viewModel.viewReportCard()
+                runCurrent()
+
+                viewModel.selectSession("second")
+                runCurrent()
+                viewModel.viewReportCard()
+                runCurrent()
+                assertTrue(viewModel.state.value.isLoadingPdf)
+
+                first.complete(byteArrayOf(1))
+                runCurrent()
+
+                assertTrue(viewModel.state.value.isLoadingPdf)
+                assertEquals(null, viewModel.state.value.pdfFile)
+            } finally {
+                first.complete(byteArrayOf(1))
+                second.complete(byteArrayOf(2))
                 viewModel.viewModelScope.cancel()
                 runCurrent()
             }

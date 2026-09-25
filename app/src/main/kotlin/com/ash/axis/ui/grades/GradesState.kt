@@ -114,6 +114,7 @@ internal fun GradesUiState.withSession(session: String?) = copy(selectedSessionI
 internal fun GradesUiState.withoutReportCard() =
     copy(
         reportCards = emptyList(),
+        isLoadingPdf = false,
         pdfFile = null,
         marksheetType = "",
         subExamTypeAA = "",
