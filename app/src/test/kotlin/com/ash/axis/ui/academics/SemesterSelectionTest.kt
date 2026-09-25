@@ -2,48 +2,35 @@ package com.ash.axis.ui.academics
 
 import com.ash.axis.data.academic.AcademicDataCoordinator
 import com.ash.axis.data.repository.AttendanceRepository
-import com.ash.axis.data.repository.SELECTED_SEMESTER_CLASS_KEY
-import com.ash.axis.data.repository.SELECTED_SEMESTER_YEAR_KEY
+import com.ash.axis.data.repository.AuthRepository
+import com.ash.axis.data.repository.TimetableRepository
 import com.ash.axis.domain.model.SemesterOption
 import com.ash.axis.domain.model.StudentRequestContext
-import com.ash.core.storage.PreferencesStore
 import io.mockk.coVerify
-import io.mockk.every
 import io.mockk.mockk
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
+import java.time.LocalDate
 
-@OptIn(ExperimentalCoroutinesApi::class)
 class SemesterSelectionTest {
     @Test
     fun `saved selection needs no option lookup and switches with account`() =
         runTest {
-            val coordinator = mockk<AcademicDataCoordinator>()
-            val attendance = mockk<AttendanceRepository>()
-            val preferences = mockk<PreferencesStore>()
-            val context = MutableStateFlow<StudentRequestContext?>(StudentRequestContext("A", 1, "Client", "2026"))
-            val year = MutableStateFlow("Y1")
-            val classId = MutableStateFlow("C1")
-            every { coordinator.activeContext } returns context
-            every { preferences.getUserString(SELECTED_SEMESTER_YEAR_KEY, any()) } returns year
-            every { preferences.getUserString(SELECTED_SEMESTER_CLASS_KEY, any()) } returns classId
-            val values = mutableListOf<SemesterOption?>()
-            val job = backgroundScope.launch { selectedSemester(coordinator, attendance, preferences).collect { values.add(it.option) } }
+            val attendance = mockk<AttendanceRepository>(relaxed = true)
+            val timetable = mockk<TimetableRepository>(relaxed = true)
+            val coordinator = AcademicDataCoordinator(attendance, timetable, mockk<AuthRepository>())
+            val first = StudentRequestContext("A", 1, "Client", "2026")
+            val second = first.copy(admno = "B")
+            val monday = LocalDate.parse("2026-09-07")
 
-            runCurrent()
-            assertEquals(SemesterOption("Y1", "C1", ""), values.last())
-
-            context.value = StudentRequestContext("B", 1, "Client", "2026")
-            year.value = "Y2"
-            classId.value = "C2"
-            runCurrent()
-            assertEquals(SemesterOption("Y2", "C2", ""), values.last())
+            coordinator.activate(first, SemesterOption("Y1", "C1", ""), monday)
+            assertEquals(first, coordinator.selectedSemester.value.context)
+            assertEquals(SemesterOption("Y1", "C1", ""), coordinator.selectedSemester.value.option)
+            coordinator.activate(second, SemesterOption("Y2", "C2", ""), monday)
+            assertEquals(second, coordinator.selectedSemester.value.context)
+            assertEquals(SemesterOption("Y2", "C2", ""), coordinator.selectedSemester.value.option)
             coVerify(exactly = 0) { attendance.getPreferredSemester(any(), any(), any(), any(), any()) }
-            job.cancel()
+            coordinator.deactivate()
         }
 }

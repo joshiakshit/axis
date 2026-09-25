@@ -3,6 +3,7 @@ package com.ash.axis.ui.attendance
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ash.axis.data.academic.AcademicDataCoordinator
+import com.ash.axis.data.academic.AcademicSemesterSelection
 import com.ash.axis.data.academic.AcademicSnapshot
 import com.ash.axis.data.repository.AttendanceKey
 import com.ash.axis.data.repository.AttendanceRepository
@@ -18,8 +19,6 @@ import com.ash.axis.domain.usecase.ForecastUseCase
 import com.ash.axis.domain.usecase.SubjectAttendance
 import com.ash.axis.domain.usecase.TimetableUseCase
 import com.ash.axis.ui.ErrorText
-import com.ash.axis.ui.academics.SemesterSelection
-import com.ash.axis.ui.academics.selectedSemester
 import com.ash.core.network.NetworkMonitor
 import com.ash.core.storage.PreferencesStore
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -79,7 +78,6 @@ class AttendanceViewModel
     ) : ViewModel() {
         private val _state = MutableStateFlow(AttendanceUiState())
         val state: StateFlow<AttendanceUiState> = _state.asStateFlow()
-        private val semesterRetry = MutableStateFlow(0L)
         private val manualAttendanceError = MutableStateFlow<Throwable?>(null)
         private val manualTimetableError = MutableStateFlow<Throwable?>(null)
 
@@ -94,16 +92,10 @@ class AttendanceViewModel
             viewModelScope.launch {
                 var observedKey: AttendanceKey? = null
                 val semesterSnapshot =
-                    selectedSemester(
-                        coordinator,
-                        attendanceRepo,
-                        preferencesStore,
-                        resolveLabel = true,
-                        retry = semesterRetry,
-                    ).flatMapLatest { selection ->
+                    coordinator.selectedSemester.flatMapLatest { selection ->
                         val context = coordinator.activeContext.value
                         val option = selection.option
-                        val current = if (selection.context == context) selection else SemesterSelection(context)
+                        val current = if (selection.context == context) selection else AcademicSemesterSelection(context)
                         val key =
                             if (context != null && option != null && selection.context == context) {
                                 AttendanceKey(context, option.classId, option.yearId)
@@ -113,6 +105,7 @@ class AttendanceViewModel
                         flow {
                             if (key != observedKey) {
                                 observedKey = key
+                                manualAttendanceError.value = null
                                 emit(current to AcademicSnapshot<AttendanceResponse>())
                             }
                             if (key == null) {
@@ -160,26 +153,28 @@ class AttendanceViewModel
 
         @Suppress("TooGenericExceptionCaught")
         fun refresh() {
-            if (_state.value.semesterError != null) semesterRetry.value++
+            if (_state.value.semesterError != null) viewModelScope.launch { coordinator.discoverSemester() }
             viewModelScope.launch {
                 launch {
                     manualAttendanceError.value = null
+                    val selection = coordinator.selectedSemester.value
                     try {
                         coordinator.refreshAttendance()
                     } catch (error: CancellationException) {
                         throw error
                     } catch (error: Exception) {
-                        manualAttendanceError.value = error
+                        if (coordinator.selectedSemester.value == selection) manualAttendanceError.value = error
                     }
                 }
                 launch {
                     manualTimetableError.value = null
+                    val context = coordinator.activeContext.value
                     try {
                         coordinator.refreshTimetable()
                     } catch (error: CancellationException) {
                         throw error
                     } catch (error: Exception) {
-                        manualTimetableError.value = error
+                        if (coordinator.activeContext.value == context) manualTimetableError.value = error
                     }
                 }
             }
@@ -250,7 +245,7 @@ class AttendanceViewModel
         private fun AttendanceEntry.toSubjectAttendance() = SubjectAttendance(subCode, subname, lecType, present, total, percent)
 
         private data class Presentation(
-            val selection: SemesterSelection,
+            val selection: AcademicSemesterSelection,
             val attendance: AcademicSnapshot<AttendanceResponse>,
             val week: AcademicSnapshot<TimetableData>,
             val threshold: Int,

@@ -2,6 +2,7 @@ package com.ash.axis.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -21,6 +22,7 @@ internal fun SessionGate(
 ) {
     val account by viewModel.state.collectAsStateWithLifecycle()
     var addingAccount by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(account.activeAdmno) { viewModel.activate(startRoute) }
 
     when {
         !account.isLoggedIn -> {
@@ -47,6 +49,7 @@ internal fun SessionGate(
                         preferencesStore = preferencesStore,
                         qrScanRequest = qrScanRequest,
                         startRoute = startRoute,
+                        onRouteVisible = viewModel::routeVisible,
                         accounts =
                             AccountUiState(
                                 account = account,

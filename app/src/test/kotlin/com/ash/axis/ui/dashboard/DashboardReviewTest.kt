@@ -2,11 +2,13 @@ package com.ash.axis.ui.dashboard
 
 import androidx.lifecycle.viewModelScope
 import com.ash.axis.data.academic.AcademicDataCoordinator
+import com.ash.axis.data.academic.AcademicSemesterSelection
 import com.ash.axis.data.academic.AcademicSnapshot
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
 import com.ash.axis.data.repository.TimetableRepository
 import com.ash.axis.domain.model.AttendanceResponse
+import com.ash.axis.domain.model.SemesterOption
 import com.ash.axis.domain.model.StudentRequestContext
 import com.ash.axis.domain.model.UserInfo
 import com.ash.axis.domain.usecase.AttendanceUseCase
@@ -79,8 +81,16 @@ class DashboardReviewTest {
         val preferences = mockk<PreferencesStore>()
         val auth = mockk<AuthRepository>()
         val network = mockk<NetworkMonitor>()
-        every { coordinator.activeContext } returns
-            MutableStateFlow<StudentRequestContext?>(StudentRequestContext("A", 1, "Client", ""))
+        val context = StudentRequestContext("A", 1, "Client", "")
+        every { coordinator.activeContext } returns MutableStateFlow<StudentRequestContext?>(context)
+        every { coordinator.selectedSemester } returns
+            MutableStateFlow(
+                AcademicSemesterSelection(
+                    context,
+                    if (savedSelection) SemesterOption("saved", "saved", "") else null,
+                    error = if (savedSelection) null else IllegalStateException("semester offline"),
+                ),
+            )
         every { coordinator.attendanceDemandError } returns errors
         every { coordinator.timetableDemandError } returns MutableStateFlow(null)
         every { preferences.getUserString(any(), any()) } answers {

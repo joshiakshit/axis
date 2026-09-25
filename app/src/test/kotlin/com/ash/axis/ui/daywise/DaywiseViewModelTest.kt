@@ -1,13 +1,14 @@
 package com.ash.axis.ui.daywise
 
 import com.ash.axis.data.academic.AcademicDataCoordinator
+import com.ash.axis.data.academic.AcademicSemesterSelection
 import com.ash.axis.data.academic.AcademicSnapshot
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.DaywiseKey
 import com.ash.axis.domain.model.DaywiseResponse
+import com.ash.axis.domain.model.SemesterOption
 import com.ash.axis.domain.model.StudentRequestContext
 import com.ash.core.network.NetworkMonitor
-import com.ash.core.storage.PreferencesStore
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -41,17 +42,13 @@ class DaywiseViewModelTest {
                 val nextMonth = MutableStateFlow(AcademicSnapshot<DaywiseResponse>())
                 val coordinator = mockk<AcademicDataCoordinator>()
                 val attendance = mockk<AttendanceRepository>()
-                val preferences = mockk<PreferencesStore>()
                 val network = mockk<NetworkMonitor>()
                 every { coordinator.activeContext } returns context
+                every { coordinator.selectedSemester } returns
+                    MutableStateFlow(
+                        AcademicSemesterSelection(context.value, SemesterOption("Y1", "C1", "")),
+                    )
                 every { coordinator.daywiseDemandError } returns MutableStateFlow(null)
-                every { preferences.getUserString(any(), any()) } answers {
-                    when (firstArg<String>()) {
-                        "selected_semester_year_id" -> flowOf("Y1")
-                        "selected_semester_class_id" -> flowOf("C1")
-                        else -> flowOf("")
-                    }
-                }
                 every { network.isOnline } returns flowOf(true)
                 coEvery { attendance.getPreferredSemester(any(), any(), any(), any(), any()) } coAnswers {
                     CompletableDeferred<com.ash.axis.domain.model.SemesterOption>().await()
@@ -61,7 +58,7 @@ class DaywiseViewModelTest {
                 }
                 coEvery { coordinator.daywiseVisible(any(), any(), any()) } returns Unit
                 coEvery { coordinator.refreshDaywise(any(), any(), any()) } returns Unit
-                val viewModel = DaywiseViewModel(attendance, coordinator, preferences, network)
+                val viewModel = DaywiseViewModel(attendance, coordinator, network)
                 runCurrent()
                 coVerify(exactly = 0) { coordinator.daywiseVisible(any(), any(), any()) }
 

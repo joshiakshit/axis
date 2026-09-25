@@ -1,6 +1,7 @@
 package com.ash.axis.ui.dashboard
 
 import com.ash.axis.data.academic.AcademicDataCoordinator
+import com.ash.axis.data.academic.AcademicSemesterSelection
 import com.ash.axis.data.academic.AcademicSnapshot
 import com.ash.axis.data.repository.AttendanceKey
 import com.ash.axis.data.repository.AttendanceRepository
@@ -9,6 +10,7 @@ import com.ash.axis.data.repository.TimetableData
 import com.ash.axis.data.repository.TimetableRepository
 import com.ash.axis.domain.model.AttendanceEndRow
 import com.ash.axis.domain.model.AttendanceResponse
+import com.ash.axis.domain.model.SemesterOption
 import com.ash.axis.domain.model.StudentRequestContext
 import com.ash.axis.domain.model.UserInfo
 import com.ash.axis.domain.usecase.AttendanceUseCase
@@ -49,8 +51,7 @@ class DashboardViewModelTest {
                 val nextKey = CompletableDeferred<kotlinx.coroutines.flow.StateFlow<AcademicSnapshot<AttendanceResponse>>>()
                 val week = MutableStateFlow(AcademicSnapshot<TimetableData>())
                 val threshold = MutableStateFlow(75)
-                val year = MutableStateFlow("Y1")
-                val classId = MutableStateFlow("C1")
+                val selection = MutableStateFlow(AcademicSemesterSelection(account, SemesterOption("Y1", "C1", "")))
                 val attendance = mockk<AttendanceRepository>()
                 val timetable = mockk<TimetableRepository>()
                 val coordinator = mockk<AcademicDataCoordinator>()
@@ -59,16 +60,10 @@ class DashboardViewModelTest {
                 val network = mockk<NetworkMonitor>()
                 val pending = CompletableDeferred<com.ash.axis.domain.model.SemesterOption>()
                 every { coordinator.activeContext } returns context
+                every { coordinator.selectedSemester } returns selection
                 every { coordinator.attendanceDemandError } returns MutableStateFlow(null)
                 every { coordinator.timetableDemandError } returns MutableStateFlow(null)
                 every { auth.getUserInfo() } returns UserInfo("A", 1, "Alex", "", "", "Client")
-                every { preferences.getUserString(any(), any()) } answers {
-                    when (firstArg<String>()) {
-                        "selected_semester_year_id" -> year
-                        "selected_semester_class_id" -> classId
-                        else -> flowOf("")
-                    }
-                }
                 every { preferences.getUserInt("attendance_threshold", 75) } returns threshold
                 every { network.isOnline } returns flowOf(true)
                 coEvery { attendance.getPreferredSemester(any(), any(), any(), any(), any()) } coAnswers { pending.await() }
@@ -114,8 +109,7 @@ class DashboardViewModelTest {
                 coVerify(exactly = 1) { coordinator.refreshAttendance() }
                 coVerify(exactly = 1) { coordinator.refreshTimetable() }
 
-                year.value = "Y2"
-                classId.value = "C2"
+                selection.value = AcademicSemesterSelection(account, SemesterOption("Y2", "C2", ""))
                 runCurrent()
                 assertFalse(viewModel.state.value.hasAttendance)
                 assertEquals(0.0, viewModel.state.value.overallPercent)
@@ -123,6 +117,7 @@ class DashboardViewModelTest {
                 runCurrent()
 
                 context.value = StudentRequestContext("B", 1, "Client", "2026")
+                selection.value = AcademicSemesterSelection(context.value, SemesterOption("Y2", "C2", ""))
                 runCurrent()
                 assertFalse(viewModel.state.value.hasAttendance)
                 assertEquals(0.0, viewModel.state.value.overallPercent)

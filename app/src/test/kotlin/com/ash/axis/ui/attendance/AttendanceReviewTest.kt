@@ -2,6 +2,7 @@ package com.ash.axis.ui.attendance
 
 import androidx.lifecycle.viewModelScope
 import com.ash.axis.data.academic.AcademicDataCoordinator
+import com.ash.axis.data.academic.AcademicSemesterSelection
 import com.ash.axis.data.academic.AcademicSnapshot
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.TimetableData
@@ -48,8 +49,10 @@ class AttendanceReviewTest {
             val threshold = MutableStateFlow(75)
             val summary = MutableStateFlow(AcademicSnapshot(data = AttendanceResponse()))
             var metadataAvailable = false
-            every { coordinator.activeContext } returns
-                MutableStateFlow<StudentRequestContext?>(StudentRequestContext("A", 1, "Client", "2026"))
+            val context = StudentRequestContext("A", 1, "Client", "2026")
+            val selection = MutableStateFlow(AcademicSemesterSelection(context, error = IllegalStateException("semester offline")))
+            every { coordinator.activeContext } returns MutableStateFlow<StudentRequestContext?>(context)
+            every { coordinator.selectedSemester } returns selection
             every { coordinator.attendanceDemandError } returns demandError
             every { coordinator.timetableDemandError } returns MutableStateFlow(null)
             every { preferences.getUserString(any(), any()) } returns flowOf("")
@@ -64,6 +67,9 @@ class AttendanceReviewTest {
             coEvery { timetable.observeWeek(any()) } returns MutableStateFlow(AcademicSnapshot<TimetableData>())
             coEvery { coordinator.refreshAttendance() } returns Unit
             coEvery { coordinator.refreshTimetable() } returns Unit
+            coEvery { coordinator.discoverSemester(any(), any()) } coAnswers {
+                if (metadataAvailable) selection.value = AcademicSemesterSelection(context, SemesterOption("Y1", "C1", "Semester 1"))
+            }
             val useCase = AttendanceUseCase()
             val viewModel =
                 AttendanceViewModel(

@@ -2,6 +2,7 @@ package com.ash.axis.ui.planner
 
 import androidx.lifecycle.viewModelScope
 import com.ash.axis.data.academic.AcademicDataCoordinator
+import com.ash.axis.data.academic.AcademicSemesterSelection
 import com.ash.axis.data.academic.AcademicSnapshot
 import com.ash.axis.data.repository.AttendanceKey
 import com.ash.axis.data.repository.AttendanceRepository
@@ -51,9 +52,13 @@ class PlannerSelectionReviewTest {
             val network = mockk<NetworkMonitor>()
             val pending = CompletableDeferred<SemesterOption>()
             every { coordinator.activeContext } returns MutableStateFlow<StudentRequestContext?>(context)
+            every { coordinator.selectedSemester } returns
+                MutableStateFlow(AcademicSemesterSelection(context, SemesterOption("Y1", "C1", "")))
+            every { coordinator.transition } returns MutableStateFlow(0L)
             every { coordinator.attendanceDemandError } returns MutableStateFlow(null)
             every { coordinator.timetableDemandError } returns MutableStateFlow(null)
             coEvery { coordinator.plannerVisible(any()) } returns Unit
+            coEvery { coordinator.plannerCoverage(any()) } returns Unit
             every { auth.getUserInfo() } returns UserInfo("A", 1, "Alex", "", "", "Client")
             every { preferences.getUserString(any(), any()) } answers {
                 flowOf(
@@ -78,7 +83,7 @@ class PlannerSelectionReviewTest {
                 PlannerViewModel(
                     attendance, timetable, coordinator, auth, markers,
                     calendar, useCase, PlannerUseCase(useCase), preferences, network,
-                )
+                ).also { it.calculationDispatcher = Dispatchers.Main }
             try {
                 runCurrent()
                 coVerify(atLeast = 1) { attendance.observeSummary(AttendanceKey(context, "C1", "Y1")) }

@@ -2,6 +2,7 @@ package com.ash.axis.ui.daywise
 
 import androidx.lifecycle.viewModelScope
 import com.ash.axis.data.academic.AcademicDataCoordinator
+import com.ash.axis.data.academic.AcademicSemesterSelection
 import com.ash.axis.data.academic.AcademicSnapshot
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.DaywiseKey
@@ -9,7 +10,6 @@ import com.ash.axis.domain.model.DaywiseResponse
 import com.ash.axis.domain.model.SemesterOption
 import com.ash.axis.domain.model.StudentRequestContext
 import com.ash.core.network.NetworkMonitor
-import com.ash.core.storage.PreferencesStore
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -39,10 +39,7 @@ class DaywiseReviewTest {
             Dispatchers.setMain(StandardTestDispatcher(testScheduler))
             val coordinator = mockk<AcademicDataCoordinator>()
             val attendance = mockk<AttendanceRepository>()
-            val preferences = mockk<PreferencesStore>()
             val network = mockk<NetworkMonitor>()
-            val year = MutableStateFlow("")
-            val classId = MutableStateFlow("")
             val demandError = MutableStateFlow<Throwable?>(null)
             val start = LocalDate.now().withDayOfMonth(1)
             val daily =
@@ -51,16 +48,11 @@ class DaywiseReviewTest {
                 )
             val nextRange = MutableStateFlow(AcademicSnapshot<DaywiseResponse>())
             var metadataAvailable = false
-            every { coordinator.activeContext } returns
-                MutableStateFlow<StudentRequestContext?>(StudentRequestContext("A", 1, "Client", "2026"))
+            val context = StudentRequestContext("A", 1, "Client", "2026")
+            val selection = MutableStateFlow(AcademicSemesterSelection(context, error = IllegalStateException("semester offline")))
+            every { coordinator.activeContext } returns MutableStateFlow<StudentRequestContext?>(context)
+            every { coordinator.selectedSemester } returns selection
             every { coordinator.daywiseDemandError } returns demandError
-            every { preferences.getUserString(any(), any()) } answers {
-                when (firstArg<String>()) {
-                    "selected_semester_year_id" -> year
-                    "selected_semester_class_id" -> classId
-                    else -> flowOf("")
-                }
-            }
             every { network.isOnline } returns flowOf(true)
             coEvery { attendance.getPreferredSemester(any(), any(), any(), any(), any()) } coAnswers {
                 if (!metadataAvailable) error("semester offline")
@@ -70,7 +62,10 @@ class DaywiseReviewTest {
                 if (firstArg<DaywiseKey>().year == "Y1") daily else nextRange
             }
             coEvery { coordinator.daywiseVisible(any(), any(), any()) } returns Unit
-            val viewModel = DaywiseViewModel(attendance, coordinator, preferences, network)
+            coEvery { coordinator.discoverSemester(any(), any()) } coAnswers {
+                if (metadataAvailable) selection.value = AcademicSemesterSelection(context, SemesterOption("Y1", "C1", "Semester 1"))
+            }
+            val viewModel = DaywiseViewModel(attendance, coordinator, network)
             try {
                 runCurrent()
                 assertEquals("semester offline", viewModel.state.value.error)
@@ -84,8 +79,7 @@ class DaywiseReviewTest {
 
                 demandError.value = IllegalStateException("range failed")
                 runCurrent()
-                year.value = "Y2"
-                classId.value = "C2"
+                selection.value = AcademicSemesterSelection(context, SemesterOption("Y2", "C2", "Semester 2"))
                 runCurrent()
                 assertFalse(viewModel.state.value.hasData)
                 assertEquals("range failed", viewModel.state.value.error)

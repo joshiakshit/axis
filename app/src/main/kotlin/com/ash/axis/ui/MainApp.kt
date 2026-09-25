@@ -56,13 +56,14 @@ internal fun MainApp(
     qrScanRequest: Int,
     accounts: AccountUiState,
     startRoute: String,
+    onRouteVisible: (String) -> Unit,
 ) {
     val navController = rememberNavController()
-    val qrViewModel: QrScanViewModel = hiltViewModel()
+    val account = accounts.account
+    val qrViewModel: QrScanViewModel = hiltViewModel(key = "qr_${account.activeAdmno}")
     val qrState by qrViewModel.state.collectAsStateWithLifecycle()
     var showQrFlow by remember { mutableStateOf(false) }
     var showAccountSwitcher by remember { mutableStateOf(false) }
-    val account = accounts.account
     val notificationsViewModel: NotificationsViewModel = hiltViewModel(key = "notifications_${account.activeAdmno}")
     val notifications by notificationsViewModel.state.collectAsStateWithLifecycle()
     LifecycleResumeEffect(notificationsViewModel) {
@@ -71,6 +72,7 @@ internal fun MainApp(
     }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
+    LaunchedEffect(currentRoute) { currentRoute?.let(onRouteVisible) }
 
     val updateViewModel: UpdateViewModel = hiltViewModel()
     val updateConfig by updateViewModel.config.collectAsStateWithLifecycle()

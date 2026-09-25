@@ -3,16 +3,14 @@ package com.ash.axis.ui.daywise
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ash.axis.data.academic.AcademicDataCoordinator
+import com.ash.axis.data.academic.AcademicSemesterSelection
 import com.ash.axis.data.academic.AcademicSnapshot
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.DaywiseKey
 import com.ash.axis.domain.model.DaywiseResponse
 import com.ash.axis.domain.model.DaywiseSlot
 import com.ash.axis.ui.ErrorText
-import com.ash.axis.ui.academics.SemesterSelection
-import com.ash.axis.ui.academics.selectedSemester
 import com.ash.core.network.NetworkMonitor
-import com.ash.core.storage.PreferencesStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
@@ -62,16 +60,14 @@ class DaywiseViewModel
     constructor(
         private val attendanceRepo: AttendanceRepository,
         private val coordinator: AcademicDataCoordinator,
-        preferencesStore: PreferencesStore,
         networkMonitor: NetworkMonitor,
     ) : ViewModel() {
         private val _state = MutableStateFlow(DaywiseUiState())
         val state: StateFlow<DaywiseUiState> = _state.asStateFlow()
         private val dateFmt = DateTimeFormatter.ISO_LOCAL_DATE
         private val monthFmt = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.ENGLISH)
-        private val semesterRetry = MutableStateFlow(0L)
-        private val semester = selectedSemester(coordinator, attendanceRepo, preferencesStore, retry = semesterRetry)
-        private val selectedSemesterState = MutableStateFlow(SemesterSelection())
+        private val semester = coordinator.selectedSemester
+        private val selectedSemesterState = MutableStateFlow(AcademicSemesterSelection())
         private val manualError = MutableStateFlow<Throwable?>(null)
         private val visible = MutableStateFlow(false)
 
@@ -97,6 +93,7 @@ class DaywiseViewModel
                     if (selection.context != previous.context ||
                         selection.option?.yearId != previous.option?.yearId
                     ) {
+                        manualError.value = null
                         _state.update {
                             it.copy(days = persistentListOf(), hasData = false, lastUpdated = null, isLoading = true, error = null)
                         }
@@ -109,7 +106,7 @@ class DaywiseViewModel
                     combine(coordinator.activeContext, selectedSemesterState, _state) { context, selection, screen ->
                         val option = selection.option
                         if (context == null || selection.context != context || option == null) {
-                            (if (selection.context == context) selection else SemesterSelection(context)) to null
+                            (if (selection.context == context) selection else AcademicSemesterSelection(context)) to null
                         } else {
                             selection to
                                 DaywiseKey(context, option.yearId, screen.monthStart.format(dateFmt), screen.monthEnd.format(dateFmt))
@@ -131,7 +128,7 @@ class DaywiseViewModel
         fun onPageVisibilityChanged(isVisible: Boolean) {
             visible.value = isVisible
             if (isVisible) {
-                if (_state.value.semesterError != null) semesterRetry.value++ else demand()
+                if (_state.value.semesterError != null) viewModelScope.launch { coordinator.discoverSemester() } else demand()
             }
         }
 
@@ -139,10 +136,11 @@ class DaywiseViewModel
         fun refresh() {
             val option = selectedSemesterState.value.option
             if (option == null) {
-                semesterRetry.value++
+                viewModelScope.launch { coordinator.discoverSemester() }
                 return
             }
             val screen = _state.value
+            val context = selectedSemesterState.value.context
             viewModelScope.launch {
                 manualError.value = null
                 try {
@@ -150,12 +148,17 @@ class DaywiseViewModel
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
-                    manualError.value = error
+                    if (coordinator.activeContext.value == context && selectedSemesterState.value.option == option &&
+                        _state.value.monthStart == screen.monthStart
+                    ) {
+                        manualError.value = error
+                    }
                 }
             }
         }
 
         fun shiftMonth(delta: Int) {
+            manualError.value = null
             val target = _state.value.monthStart.plusMonths(delta.toLong())
             val selected = target.withDayOfMonth(target.lengthOfMonth().coerceAtMost(_state.value.selectedDate.dayOfMonth))
             setMonth(target, selected)
@@ -244,7 +247,7 @@ class DaywiseViewModel
         }
 
         private data class DaywisePresentation(
-            val selection: SemesterSelection,
+            val selection: AcademicSemesterSelection,
             val snapshot: AcademicSnapshot<DaywiseResponse>,
             val demandError: Throwable?,
             val manualError: Throwable?,

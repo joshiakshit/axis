@@ -2,6 +2,7 @@ package com.ash.axis.ui.planner
 
 import androidx.lifecycle.viewModelScope
 import com.ash.axis.data.academic.AcademicDataCoordinator
+import com.ash.axis.data.academic.AcademicSemesterSelection
 import com.ash.axis.data.academic.AcademicSnapshot
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
@@ -11,6 +12,7 @@ import com.ash.axis.data.repository.TimetableData
 import com.ash.axis.data.repository.TimetableKey
 import com.ash.axis.data.repository.TimetableRepository
 import com.ash.axis.domain.model.AttendanceResponse
+import com.ash.axis.domain.model.SemesterOption
 import com.ash.axis.domain.model.StudentRequestContext
 import com.ash.axis.domain.model.TimetableSlot
 import com.ash.axis.domain.model.UserInfo
@@ -28,6 +30,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -44,6 +47,58 @@ class PlannerCoverageViewModelTest {
     private val today = LocalDate.now()
     private val currentWeek = plannerWeekStart(today)
     private val flows = mutableMapOf<TimetableKey, MutableStateFlow<AcademicSnapshot<TimetableData>>>()
+    private val transition = MutableStateFlow(0L)
+    private val coverageRequests = mutableListOf<Collection<LocalDate>>()
+
+    @Test
+    fun `distant horizon remains required without opening every week observer`() =
+        runTest {
+            Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+            val viewModel = viewModel()
+            try {
+                awaitState(viewModel) { it.coreReady && today in it.coveredDates }
+                viewModel.setTodayAttendance(TodayAttendance.ATTENDED)
+                awaitState(viewModel) { it.todayAttendance == TodayAttendance.ATTENDED }
+                val farWeek = plannerWeekStart(today.plusWeeks(40))
+                viewModel.previewDate(today.plusWeeks(40))
+                runCurrent()
+
+                assertTrue(coverageRequests.any { farWeek in it })
+                assertTrue(flows.size <= 8, "Opened ${flows.size} timetable observers")
+            } finally {
+                viewModel.viewModelScope.cancel()
+                runCurrent()
+                Dispatchers.resetMain()
+            }
+        }
+
+    @Test
+    fun `cache transition rejects a suspended projection completion`() =
+        runTest {
+            Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+            val viewModel = viewModel()
+            try {
+                awaitState(viewModel) { it.coreReady && today in it.coveredDates }
+                viewModel.setTodayAttendance(TodayAttendance.ATTENDED)
+                awaitState(viewModel) { it.todayAttendance == TodayAttendance.ATTENDED }
+                viewModel.clearDates()
+                val calculation = StandardTestDispatcher(TestCoroutineScheduler())
+                viewModel.calculationDispatcher = calculation
+
+                viewModel.previewDate(today)
+                runCurrent()
+                transition.value++
+                calculation.scheduler.runCurrent()
+                runCurrent()
+
+                assertTrue(viewModel.state.value.projected.isEmpty())
+                assertEquals(null, viewModel.state.value.anchorDate)
+            } finally {
+                viewModel.viewModelScope.cancel()
+                runCurrent()
+                Dispatchers.resetMain()
+            }
+        }
 
     @Test
     fun `used week observes refreshed dates reset and recovery`() =
@@ -130,9 +185,12 @@ class PlannerCoverageViewModelTest {
         val preferences = mockk<PreferencesStore>(relaxed = true)
         val network = mockk<NetworkMonitor>()
         every { coordinator.activeContext } returns MutableStateFlow(context)
+        every { coordinator.selectedSemester } returns MutableStateFlow(AcademicSemesterSelection(context, SemesterOption("Y1", "C1", "")))
+        every { coordinator.transition } returns transition
         every { coordinator.attendanceDemandError } returns MutableStateFlow(null)
         every { coordinator.timetableDemandError } returns MutableStateFlow(null)
         coEvery { coordinator.plannerVisible(any()) } returns Unit
+        coEvery { coordinator.plannerCoverage(any()) } coAnswers { coverageRequests += firstArg<Collection<LocalDate>>() }
         every { auth.getUserInfo() } returns UserInfo("A", 1, "Alex", "", "", "Client")
         coEvery { calendar.getCalendar(any(), any(), any(), any()) } throws IllegalStateException("calendar offline")
         coEvery { markers.observe(any()) } returns flowOf(emptyList())
@@ -155,7 +213,7 @@ class PlannerCoverageViewModelTest {
         return PlannerViewModel(
             attendance, timetable, coordinator, auth, markers, calendar,
             useCase, PlannerUseCase(useCase), preferences, network,
-        )
+        ).also { it.calculationDispatcher = Dispatchers.Main }
     }
 
     private fun flow(monday: LocalDate): MutableStateFlow<AcademicSnapshot<TimetableData>> =
@@ -177,23 +235,15 @@ class PlannerCoverageViewModelTest {
     private fun slot(code: String) = TimetableSlot(subCode = code)
 
     private suspend fun kotlinx.coroutines.test.TestScope.awaitFlow(monday: LocalDate) {
-        repeat(100) {
-            runCurrent()
-            if (flows.keys.any { it.startDate == monday.toString() }) return
-            Thread.sleep(2)
-        }
-        error("Week was not observed: $monday; observed=${flows.keys}")
+        runCurrent()
+        assertTrue(flows.keys.any { it.startDate == monday.toString() }, "Week was not observed: $monday")
     }
 
     private suspend fun kotlinx.coroutines.test.TestScope.awaitState(
         viewModel: PlannerViewModel,
         condition: (PlannerUiState) -> Boolean,
     ) {
-        repeat(100) {
-            runCurrent()
-            if (condition(viewModel.state.value)) return
-            Thread.sleep(2)
-        }
-        error("Planner state did not reach the expected condition: ${viewModel.state.value}; flows=${flows.keys}")
+        runCurrent()
+        assertTrue(condition(viewModel.state.value), "Planner state did not reach the expected condition: ${viewModel.state.value}")
     }
 }

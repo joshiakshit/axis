@@ -3,14 +3,15 @@ package com.ash.axis.ui.qr
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ash.axis.BuildConfig
-import com.ash.axis.data.DataRefreshSignal
-import com.ash.axis.data.RefreshTrigger
+import com.ash.axis.data.academic.AcademicDataCoordinator
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
 import com.ash.axis.data.repository.IcloudServerException
 import com.ash.axis.data.session.UsageReporter
+import com.ash.axis.domain.model.StudentRequestContext
 import com.ash.axis.ui.ErrorText
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,7 +34,7 @@ class QrScanViewModel
         private val attendanceRepo: AttendanceRepository,
         private val authRepository: AuthRepository,
         private val usageReporter: UsageReporter,
-        private val refreshSignal: DataRefreshSignal,
+        private val academic: AcademicDataCoordinator,
     ) : ViewModel() {
         private val _state = MutableStateFlow(QrScanUiState())
         val state: StateFlow<QrScanUiState> = _state.asStateFlow()
@@ -66,6 +67,7 @@ class QrScanViewModel
                 try {
                     diagnostics.stage(QrStage.AUTHENTICATION)
                     val user = authRepository.getUserInfo() ?: error("Not logged in")
+                    val origin = StudentRequestContext(user.admno, user.brId, user.clientId, user.academicYear)
                     val result =
                         attendanceRepo.sendScanQR(
                             rawQr = rawQr,
@@ -80,16 +82,17 @@ class QrScanViewModel
                         )
                     diagnostics.response(result.httpStatus, result.httpDurationMs ?: 0, result.success)
                     usageReporter.log(if (result.success == true) UsageReporter.QR_SCAN else UsageReporter.QR_FAIL)
-                    if (result.success == true) {
-                        refreshSignal.emit(RefreshTrigger.ATTENDANCE)
-                    }
+                    val message = if (result.success == true) refreshMessage(origin, result.message) else result.message
+                    if (!isCurrentOrigin(origin)) return@launch
                     _state.update {
                         it.copy(
                             isSubmitting = false,
-                            message = result.message,
+                            message = message,
                             success = result.success,
                         )
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     val status = (e as? IcloudServerException)?.statusCode ?: (e as? HttpException)?.code()
                     diagnostics.error(e, status, (System.nanoTime() - startedAt) / 1_000_000)
@@ -108,5 +111,30 @@ class QrScanViewModel
         private companion object {
             const val FIXED_LATITUDE = 28.365857
             const val FIXED_LONGITUDE = 77.5404963
+        }
+
+        private fun sameAccount(
+            left: StudentRequestContext,
+            right: StudentRequestContext,
+        ) = left.admno == right.admno && left.brId == right.brId && left.clientId == right.clientId
+
+        private suspend fun refreshMessage(
+            origin: StudentRequestContext,
+            message: String,
+        ): String =
+            try {
+                academic.qrSucceeded(origin)
+                message
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                "$message Attendance refresh failed: ${ErrorText.forData(error)}"
+            }
+
+        private fun isCurrentOrigin(origin: StudentRequestContext): Boolean {
+            val active = academic.activeContext.value
+            val currentUser = authRepository.getUserInfo() ?: return false
+            return (active == null || sameAccount(active, origin)) &&
+                currentUser.admno == origin.admno && currentUser.brId == origin.brId && currentUser.clientId == origin.clientId
         }
     }

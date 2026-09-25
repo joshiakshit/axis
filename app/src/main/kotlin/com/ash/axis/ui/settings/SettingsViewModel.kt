@@ -5,13 +5,13 @@ import android.content.Intent
 import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.ash.axis.data.academic.AcademicDataCoordinator
 import com.ash.axis.data.export.DataExporter
 import com.ash.axis.data.export.ExportFile
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
 import com.ash.axis.data.repository.SELECTED_SEMESTER_CLASS_KEY
 import com.ash.axis.data.repository.SELECTED_SEMESTER_YEAR_KEY
-import com.ash.axis.data.repository.TimetableRepository
 import com.ash.axis.data.session.UsageReporter
 import com.ash.axis.domain.model.SemesterOption
 import com.ash.axis.ui.ErrorText
@@ -54,7 +54,7 @@ class SettingsViewModel
         private val preferencesStore: PreferencesStore,
         private val authRepository: AuthRepository,
         private val attendanceRepo: AttendanceRepository,
-        private val timetableRepo: TimetableRepository,
+        private val academic: AcademicDataCoordinator,
         private val dataExporter: DataExporter,
         private val usageReporter: UsageReporter,
         @ApplicationContext private val appContext: Context,
@@ -221,8 +221,11 @@ class SettingsViewModel
 
         fun setSelectedSemester(option: SemesterOption) {
             viewModelScope.launch {
-                preferencesStore.putUserString(SELECTED_SEMESTER_YEAR_KEY, option.yearId)
-                preferencesStore.putUserString(SELECTED_SEMESTER_CLASS_KEY, option.classId)
+                val context = academic.activeContext.value ?: return@launch
+                preferencesStore.putString("${context.admno}_$SELECTED_SEMESTER_YEAR_KEY", option.yearId)
+                preferencesStore.putString("${context.admno}_$SELECTED_SEMESTER_CLASS_KEY", option.classId)
+                if (academic.activeContext.value != context) return@launch
+                academic.selectSemester(option)
                 _state.update { it.copy(selectedSemester = option) }
             }
         }
@@ -238,8 +241,7 @@ class SettingsViewModel
             viewModelScope.launch {
                 _state.update { it.copy(isClearing = true) }
                 try {
-                    attendanceRepo.clearCache()
-                    timetableRepo.clearCache()
+                    academic.clearAcademicCache()
                     clearGeneratedFiles()
                 } finally {
                     _state.update { it.copy(isClearing = false) }
@@ -249,8 +251,8 @@ class SettingsViewModel
 
         fun logout(onLoggedOut: () -> Unit) {
             viewModelScope.launch {
-                attendanceRepo.clearCache()
-                timetableRepo.clearCache()
+                academic.deactivate()
+                academic.clearAcademicCache()
                 clearGeneratedFiles()
                 preferencesStore.clearUserScoped()
                 authRepository.logout()
