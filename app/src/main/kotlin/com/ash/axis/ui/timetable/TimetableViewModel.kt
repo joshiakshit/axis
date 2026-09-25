@@ -175,13 +175,23 @@ class TimetableViewModel
             }
         }
 
-        @Suppress("CyclomaticComplexMethod")
+        @Suppress("CyclomaticComplexMethod", "LongMethod")
         private fun bindWeek(
             date: LocalDate,
             retry: Boolean,
         ) {
             val ws = weekStart(date)
-            weekJobs.keys.filter { it != ws }.forEach { old -> weekJobs.remove(old)?.cancel() }
+            weekJobs.keys.filter {
+                it != ws && (it !in _state.value.loadedWeeks || it.isBefore(ws.minusWeeks(1)) || it.isAfter(ws.plusWeeks(1)))
+            }
+                .forEach { old -> weekJobs.remove(old)?.cancel() }
+            _state.update { current ->
+                val retained = current.loadedWeeks.filter { it in weekJobs.keys || it == ws }.toSet()
+                current.copy(
+                    dayCache = current.dayCache.filterKeys { weekStart(it) in retained }.toImmutableMap(),
+                    loadedWeeks = retained.toImmutableSet(),
+                )
+            }
             if (weekJobs[ws]?.isActive == true && !retry) return
             weekJobs[ws]?.cancel()
             weekJobs[ws] =
@@ -208,9 +218,15 @@ class TimetableViewModel
                                     }
                                 }
                             _state.update { current ->
+                                val retainedDays = current.dayCache.filterKeys { weekStart(it) != ws }
                                 current.copy(
-                                    dayCache = if (days == null) current.dayCache else (current.dayCache + days).toImmutableMap(),
-                                    loadedWeeks = if (days == null) current.loadedWeeks else (current.loadedWeeks + ws).toImmutableSet(),
+                                    dayCache = (retainedDays + days.orEmpty()).toImmutableMap(),
+                                    loadedWeeks =
+                                        if (days == null) {
+                                            (current.loadedWeeks - ws).toImmutableSet()
+                                        } else {
+                                            (current.loadedWeeks + ws).toImmutableSet()
+                                        },
                                     loadingWeeks =
                                         if (result.refreshing) {
                                             (current.loadingWeeks + ws).toImmutableSet()

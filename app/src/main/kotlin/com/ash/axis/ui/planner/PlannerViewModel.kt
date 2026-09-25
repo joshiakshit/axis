@@ -17,6 +17,7 @@ import com.ash.axis.data.repository.TimetableRepository
 import com.ash.axis.domain.model.AttendanceResponse
 import com.ash.axis.domain.model.StudentMarker
 import com.ash.axis.domain.model.StudentMarkerType
+import com.ash.axis.domain.model.StudentRequestContext
 import com.ash.axis.domain.model.TimetableSlot
 import com.ash.axis.domain.model.markerNoClassDates
 import com.ash.axis.domain.usecase.AttendanceTone
@@ -57,6 +58,7 @@ import javax.inject.Inject
 
 data class PlannerUiState(
     val isLoading: Boolean = true,
+    val coreReady: Boolean = false,
     val error: String? = null,
     val threshold: Int = 75,
     val overallPresent: Int = 0,
@@ -65,6 +67,10 @@ data class PlannerUiState(
     val timetable: ImmutableMap<String, ImmutableList<TimetableSlot>> = persistentMapOf(),
     val dateTimetable: ImmutableMap<LocalDate, ImmutableList<TimetableSlot>> = persistentMapOf(),
     val coveredDates: ImmutableSet<LocalDate> = persistentSetOf(),
+    val estimatedDates: ImmutableSet<LocalDate> = persistentSetOf(),
+    val failedWeeks: ImmutableSet<LocalDate> = persistentSetOf(),
+    val pendingWeeks: ImmutableSet<LocalDate> = persistentSetOf(),
+    val projectionCoverage: ProjectionCoverage? = null,
     val selectedDates: ImmutableSet<LocalDate> = persistentSetOf(),
     val holidays: ImmutableSet<LocalDate> = persistentSetOf(),
     val markers: ImmutableList<StudentMarker> = persistentListOf(),
@@ -108,9 +114,8 @@ class PlannerViewModel
         private var calendarJob: Job? = null
         private var markerOwnerId: String? = null
         private var cachedSemesterEnd: LocalDate? = null
-        private val coveredWeeks = mutableSetOf<LocalDate>()
         private val coverageJobs = mutableMapOf<LocalDate, Job>()
-        private var coverageTail: Job? = null
+        private var requiredWeeks: Set<LocalDate> = emptySet()
         private var selectedAttendanceKey: AttendanceKey? = null
         private var selectedWeekKey: TimetableKey? = null
         private var selectedSemesterIds: Pair<String, String>? = null
@@ -131,8 +136,7 @@ class PlannerViewModel
                 coordinator.activeContext.collect {
                     coverageJobs.values.forEach(Job::cancel)
                     coverageJobs.clear()
-                    coveredWeeks.clear()
-                    coverageTail = null
+                    requiredWeeks = emptySet()
                     selectedAttendanceKey = null
                     selectedWeekKey = null
                     markerJob?.cancel()
@@ -140,9 +144,14 @@ class PlannerViewModel
                     _state.update { current ->
                         current.copy(
                             subjects = persistentListOf(),
+                            coreReady = false,
                             timetable = persistentMapOf(),
                             dateTimetable = persistentMapOf(),
                             coveredDates = persistentSetOf(),
+                            estimatedDates = persistentSetOf(),
+                            failedWeeks = persistentSetOf(),
+                            pendingWeeks = persistentSetOf(),
+                            projectionCoverage = null,
                             todayAttendance = null,
                             todayHasClasses = false,
                             projected = persistentListOf(),
@@ -155,6 +164,7 @@ class PlannerViewModel
         }
 
         fun refresh() {
+            requiredWeeks = emptySet()
             load(forceRefresh = true)
             loadCalendar(forceRefresh = true)
         }
@@ -247,44 +257,72 @@ class PlannerViewModel
             _state.update { it.copy(holidayMode = !it.holidayMode) }
         }
 
+        @Suppress("LongMethod", "CyclomaticComplexMethod")
         private suspend fun recomputeProjection(base: PlannerUiState): PlannerUiState {
             val today = LocalDate.now()
-            val todayAttendance = base.todayAttendance ?: return base.copy(projected = persistentListOf())
-            val absenceDates = base.selectedDates
-            val noClassDates = base.holidays + markerNoClassDates(base.markers)
+            val working = syncCoverage(base)
+            val todayAttendance =
+                working.todayAttendance
+                    ?: return working.copy(
+                        projected = persistentListOf(),
+                        projectionCoverage =
+                            when {
+                                today !in working.coveredDates -> ProjectionCoverage.LOADING
+                                today in working.estimatedDates -> ProjectionCoverage.ESTIMATE
+                                else -> null
+                            },
+                    )
+            val absenceDates = working.selectedDates
+            val noClassDates = working.holidays + markerNoClassDates(working.markers)
             val horizon =
                 listOfNotNull(
-                    base.anchorDate,
+                    working.anchorDate,
                     absenceDates.filter { !it.isBefore(today) }.maxOrNull(),
                 ).maxOrNull()
-
-            if (horizon != null) requestCoverage(today, horizon)
+            val coverage =
+                if (horizon != null && plannerWeekStart(horizon) !in requiredWeeks) {
+                    ProjectionCoverage.LIMITED
+                } else {
+                    plannerProjectionCoverage(
+                        today,
+                        horizon,
+                        working.coveredDates,
+                        working.estimatedDates,
+                        working.failedWeeks,
+                        working.pendingWeeks,
+                    )
+                }
+            if (coverage == ProjectionCoverage.LOADING || coverage == ProjectionCoverage.FAILED ||
+                coverage == ProjectionCoverage.LIMITED
+            ) {
+                return working.copy(projected = persistentListOf(), projectionCoverage = coverage)
+            }
 
             val projectionData =
-                base.dateTimetable.filterKeys { date ->
+                working.dateTimetable.filterKeys { date ->
                     date !in noClassDates && (date == today || horizon?.let { date in today..it } == true)
                 }
             val projected =
                 withContext(Dispatchers.Default) {
                     val raw =
                         plannerUseCase.computeProjected(
-                            base.subjects,
+                            working.subjects,
                             absenceDates,
                             projectionData,
-                            base.threshold,
+                            working.threshold,
                             cachedSemesterEnd,
-                            base.timetable,
+                            working.timetable,
                             today,
                             includeNoAbsence = true,
                             noClassDates = noClassDates,
                             projectionEnd = horizon,
                             todayAttendance = todayAttendance,
                         )
-                    val focusDate = base.anchorDate ?: absenceDates.maxOrNull()
+                    val focusDate = working.anchorDate ?: absenceDates.maxOrNull()
                     val dayKey = focusDate?.let { DAY_NAMES[it.dayOfWeek] }
                     val daySlotCodes =
                         if (dayKey != null) {
-                            (base.timetable[dayKey] ?: emptyList())
+                            (working.timetable[dayKey] ?: emptyList())
                                 .map { it.subCode.uppercase().trim() }
                                 .toSet()
                         } else {
@@ -295,7 +333,7 @@ class PlannerViewModel
                             .thenBy { it.delta },
                     ).toImmutableList()
                 }
-            return base.copy(projected = projected)
+            return working.copy(projected = projected, projectionCoverage = coverage)
         }
 
         fun setSemesterEndDate(dateStr: String) {
@@ -339,7 +377,7 @@ class PlannerViewModel
             val newMonth = _state.value.simulatorMonth.plusMonths(delta.toLong())
             _state.update { it.copy(simulatorMonth = newMonth) }
             loadCalendar()
-            requestCoverage(newMonth, newMonth.withDayOfMonth(newMonth.lengthOfMonth()))
+            viewModelScope.launch { _state.value = recomputeProjection(_state.value) }
         }
 
         private fun load(forceRefresh: Boolean) {
@@ -351,12 +389,18 @@ class PlannerViewModel
                         val user = authRepository.getUserInfo() ?: error("Not logged in")
                         val selectedYearId = preferencesStore.getUserString(SELECTED_SEMESTER_YEAR_KEY).first()
                         val selectedClassId = preferencesStore.getUserString(SELECTED_SEMESTER_CLASS_KEY).first()
-                        val semester =
-                            attendanceRepo.getPreferredSemester(
-                                user.admno, user.brId, selectedYearId, selectedClassId, forceRefresh,
-                            )
+                        val selection =
+                            if (selectedYearId.isNotBlank() && selectedClassId.isNotBlank()) {
+                                selectedClassId to selectedYearId
+                            } else {
+                                val semester =
+                                    attendanceRepo.getPreferredSemester(
+                                        user.admno, user.brId, selectedYearId, selectedClassId,
+                                    )
+                                semester.classId to semester.yearId
+                            }
                         val monday = plannerWeekStart(LocalDate.now())
-                        val attendanceKey = AttendanceKey(context, semester.classId, semester.yearId)
+                        val attendanceKey = AttendanceKey(context, selection.first, selection.second)
                         val weekKey = TimetableKey(context, monday.toString(), monday.plusDays(6).toString())
                         selectedAttendanceKey = attendanceKey
                         selectedWeekKey = weekKey
@@ -420,12 +464,30 @@ class PlannerViewModel
             val savedTodayDate = preferencesStore.getUserString(TODAY_ATTENDANCE_DATE_KEY).first()
             val savedTodayStatus = preferencesStore.getUserString(TODAY_ATTENDANCE_STATUS_KEY).first()
             val old = _state.value
-            val allDates = old.dateTimetable + dates.mapValues { it.value.toImmutableList() }
-            val covered = if (timetable == null) old.coveredDates else (old.coveredDates + dates.keys).toImmutableSet()
+            if (timetable == null) {
+                coverageJobs.values.forEach(Job::cancel)
+                coverageJobs.clear()
+                requiredWeeks = emptySet()
+            }
+            val allDates =
+                if (timetable == null) {
+                    emptyMap()
+                } else {
+                    old.dateTimetable.filterKeys { plannerWeekStart(it) != monday } +
+                        dates.mapValues { it.value.toImmutableList() }
+                }
+            val covered =
+                if (timetable == null) {
+                    persistentSetOf()
+                } else {
+                    (old.coveredDates.filterNot { plannerWeekStart(it) == monday } + dates.keys).toImmutableSet()
+                }
+            val estimates = timetable?.let { plannerEstimatedDates(monday, it) }.orEmpty()
             val hasClasses = allDates[today]?.isNotEmpty() == true && today !in markerNoClassDates(old.markers)
             val todayAttendance =
                 when {
                     today !in covered -> old.todayAttendance
+                    today in estimates && !hasClasses -> null
                     !hasClasses -> TodayAttendance.NO_CLASSES
                     old.todayAttendance != null && old.todayAttendance != TodayAttendance.NO_CLASSES -> old.todayAttendance
                     savedTodayDate != today.toString() -> null
@@ -434,15 +496,34 @@ class PlannerViewModel
             val base =
                 old.copy(
                     isLoading = attendance == null && timetable == null && summary.error == null && week.error == null,
+                    coreReady = attendance != null && timetable != null,
                     isRefreshing = summary.refreshing || week.refreshing,
                     error = listOfNotNull(summary.error, week.error).firstOrNull()?.let(ErrorText::forData),
                     threshold = threshold,
-                    overallPresent = attendance?.endrow?.present ?: old.overallPresent,
-                    overallTotal = attendance?.endrow?.total ?: old.overallTotal,
+                    overallPresent = attendance?.endrow?.present ?: 0,
+                    overallTotal = attendance?.endrow?.total ?: 0,
                     subjects = computed.subjects.toImmutableList(),
                     timetable = weekly.mapValues { it.value.toImmutableList() }.toImmutableMap(),
                     dateTimetable = allDates.toImmutableMap(),
                     coveredDates = covered,
+                    estimatedDates =
+                        if (timetable == null) {
+                            persistentSetOf()
+                        } else {
+                            (old.estimatedDates.filterNot { plannerWeekStart(it) == monday } + estimates).toImmutableSet()
+                        },
+                    failedWeeks =
+                        if (week.error == null) {
+                            (old.failedWeeks - monday).toImmutableSet()
+                        } else {
+                            (old.failedWeeks + monday).toImmutableSet()
+                        },
+                    pendingWeeks =
+                        if (week.refreshing) {
+                            (old.pendingWeeks + monday).toImmutableSet()
+                        } else {
+                            (old.pendingWeeks - monday).toImmutableSet()
+                        },
                     totalSpare = computed.totalSpare,
                     semesterEndSet = cachedSemesterEnd != null,
                     semesterEndDate = cachedSemesterEnd,
@@ -455,67 +536,117 @@ class PlannerViewModel
             ) {
                 return
             }
-            val next = if (todayAttendance == null) base.copy(projected = persistentListOf()) else recomputeProjection(base)
+            val next = recomputeProjection(base)
             if (attendanceKey != selectedAttendanceKey || weekKey != selectedWeekKey ||
                 coordinator.activeContext.value != weekKey?.context
             ) {
                 return
             }
             _state.value = next
-            if (attendance != null && timetable != null) {
-                requestCoverage(old.simulatorMonth, old.simulatorMonth.withDayOfMonth(old.simulatorMonth.lengthOfMonth()))
-            }
         }
 
-        private fun requestCoverage(
-            start: LocalDate,
-            end: LocalDate,
-        ) {
-            val context = coordinator.activeContext.value ?: return
-            var monday = plannerWeekStart(start)
-            while (!monday.isAfter(end)) {
-                val week = monday
-                if (week !in coveredWeeks && coverageJobs[week]?.isActive != true) {
-                    val previous = coverageTail
+        @Suppress("CyclomaticComplexMethod")
+        private fun syncCoverage(base: PlannerUiState): PlannerUiState {
+            val context = coordinator.activeContext.value ?: return base
+            if (!base.coreReady) return base
+            val today = LocalDate.now()
+            val currentWeek = plannerWeekStart(today)
+            val monthStart = base.simulatorMonth
+            val monthEnd = monthStart.withDayOfMonth(monthStart.lengthOfMonth())
+            val horizon = listOfNotNull(base.anchorDate, base.selectedDates.maxOrNull()).maxOrNull()
+            val visibleWeeks = plannerWeeks(monthStart, monthEnd)
+            val projectionWeeks = if (base.todayAttendance != null && horizon != null) plannerWeeks(today, horizon) else emptyList()
+            val wanted = (listOf(currentWeek) + visibleWeeks + projectionWeeks).distinct().take(MAX_COVERAGE_WEEKS).toSet()
+            if (wanted != requiredWeeks) {
+                requiredWeeks = wanted
+                coverageJobs.keys.filter { it !in wanted }.forEach { coverageJobs.remove(it)?.cancel() }
+                wanted.filter { it != currentWeek && coverageJobs[it]?.isActive != true }.forEach { week ->
                     coverageJobs[week] =
                         viewModelScope.launch {
-                            previous?.join()
-                            if (coordinator.activeContext.value != context) return@launch
                             val key = TimetableKey(context, week.toString(), week.plusDays(6).toString())
                             try {
-                                val flow = timetableRepo.observeWeek(key)
-                                launch { timetableRepo.requestWeek(key) }
-                                var started = false
-                                val snapshot =
-                                    flow.first {
-                                        if (it.refreshing) started = true
-                                        it.data != null || it.error != null || (started && !it.refreshing)
-                                    }
-                                if (coordinator.activeContext.value == context) {
-                                    val data = snapshot.data ?: return@launch
-                                    val dates = plannerWeekDates(week, data)
-                                    coveredWeeks += week
-                                    val immutableDates = dates.mapValues { it.value.toImmutableList() }
-                                    _state.update { current ->
-                                        current.copy(
-                                            dateTimetable = (current.dateTimetable + immutableDates).toImmutableMap(),
-                                            coveredDates = (current.coveredDates + dates.keys).toImmutableSet(),
-                                        )
-                                    }
-                                    val current = _state.value
-                                    _state.value = recomputeProjection(current)
+                                timetableRepo.observeWeek(key).collect { snapshot ->
+                                    applyCoverageSnapshot(context, week, snapshot)
                                 }
                             } catch (error: CancellationException) {
                                 throw error
-                            } catch (_: Exception) {
-                                coverageJobs.remove(week)
+                            } catch (error: Exception) {
+                                markCoverageFailure(context, week, error)
                             }
                         }
-                    coverageTail = coverageJobs[week]
                 }
-                monday = monday.plusWeeks(1)
+                wanted.filter { it != currentWeek }.forEach { week ->
+                    viewModelScope.launch {
+                        val key = TimetableKey(context, week.toString(), week.plusDays(6).toString())
+                        try {
+                            timetableRepo.requestWeek(key)
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (error: Exception) {
+                            markCoverageFailure(context, week, error)
+                        }
+                    }
+                }
             }
+            return base.copy(
+                dateTimetable = base.dateTimetable.filterKeys { plannerWeekStart(it) in wanted }.toImmutableMap(),
+                coveredDates = base.coveredDates.filterTo(mutableSetOf()) { plannerWeekStart(it) in wanted }.toImmutableSet(),
+                estimatedDates = base.estimatedDates.filterTo(mutableSetOf()) { plannerWeekStart(it) in wanted }.toImmutableSet(),
+                failedWeeks = base.failedWeeks.filterTo(mutableSetOf()) { it in wanted }.toImmutableSet(),
+                pendingWeeks = base.pendingWeeks.filterTo(mutableSetOf()) { it in wanted }.toImmutableSet(),
+            )
         }
+
+        private suspend fun applyCoverageSnapshot(
+            context: StudentRequestContext,
+            week: LocalDate,
+            snapshot: AcademicSnapshot<TimetableData>,
+        ) {
+            if (coordinator.activeContext.value != context || week !in requiredWeeks) return
+            val dates = snapshot.data?.let { plannerWeekDates(week, it) }.orEmpty()
+            val estimates = snapshot.data?.let { plannerEstimatedDates(week, it) }.orEmpty()
+            _state.update { current ->
+                current.copy(
+                    dateTimetable =
+                        (
+                            current.dateTimetable.filterKeys { plannerWeekStart(it) != week } +
+                                dates.mapValues { it.value.toImmutableList() }
+                        ).toImmutableMap(),
+                    coveredDates =
+                        (current.coveredDates.filterNot { plannerWeekStart(it) == week } + dates.keys).toImmutableSet(),
+                    estimatedDates =
+                        (current.estimatedDates.filterNot { plannerWeekStart(it) == week } + estimates).toImmutableSet(),
+                    failedWeeks =
+                        if (snapshot.error == null) {
+                            (current.failedWeeks - week).toImmutableSet()
+                        } else {
+                            (current.failedWeeks + week).toImmutableSet()
+                        },
+                    pendingWeeks =
+                        if (snapshot.refreshing) {
+                            (current.pendingWeeks + week).toImmutableSet()
+                        } else {
+                            (current.pendingWeeks - week).toImmutableSet()
+                        },
+                )
+            }
+            _state.value = recomputeProjection(_state.value)
+        }
+
+        private suspend fun markCoverageFailure(
+            context: StudentRequestContext,
+            week: LocalDate,
+            error: Exception,
+        ) {
+            if (coordinator.activeContext.value != context || week !in requiredWeeks) return
+            _state.update { it.copy(failedWeeks = (it.failedWeeks + week).toImmutableSet(), error = ErrorText.forData(error)) }
+            _state.value = recomputeProjection(_state.value)
+        }
+
+        private fun plannerWeeks(
+            start: LocalDate,
+            end: LocalDate,
+        ): List<LocalDate> = generateSequence(plannerWeekStart(start)) { it.plusWeeks(1) }.takeWhile { !it.isAfter(end) }.toList()
 
         private fun observeMarkers(ownerId: String) {
             if (markerOwnerId == ownerId) return
@@ -532,6 +663,7 @@ class PlannerViewModel
                         val todayAttendance =
                             when {
                                 today !in _state.value.coveredDates -> currentAttendance
+                                today in _state.value.estimatedDates && !hasClasses -> null
                                 !hasClasses -> TodayAttendance.NO_CLASSES
                                 currentAttendance == TodayAttendance.NO_CLASSES -> null
                                 else -> currentAttendance
@@ -554,6 +686,7 @@ class PlannerViewModel
         )
 
         private companion object {
+            const val MAX_COVERAGE_WEEKS = 32
             const val TODAY_ATTENDANCE_DATE_KEY = "planner_today_attendance_date"
             const val TODAY_ATTENDANCE_STATUS_KEY = "planner_today_attendance_status"
 

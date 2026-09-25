@@ -46,12 +46,14 @@ class PlannerSelectionReviewTest {
             val timetable = mockk<TimetableRepository>(relaxed = true)
             val auth = mockk<AuthRepository>()
             val calendar = mockk<CalendarRepository>()
+            val markers = mockk<StudentMarkerRepository>()
             val preferences = mockk<PreferencesStore>()
             val network = mockk<NetworkMonitor>()
             val pending = CompletableDeferred<SemesterOption>()
             every { coordinator.activeContext } returns MutableStateFlow<StudentRequestContext?>(context)
             every { coordinator.attendanceDemandError } returns MutableStateFlow(null)
             every { coordinator.timetableDemandError } returns MutableStateFlow(null)
+            coEvery { coordinator.plannerVisible(any()) } returns Unit
             every { auth.getUserInfo() } returns UserInfo("A", 1, "Alex", "", "", "Client")
             every { preferences.getUserString(any(), any()) } answers {
                 flowOf(
@@ -66,13 +68,15 @@ class PlannerSelectionReviewTest {
             every { preferences.getUserInt(any(), any()) } returns flowOf(75)
             every { network.isOnline } returns flowOf(true)
             coEvery { calendar.getCalendar(any(), any(), any(), any()) } throws IllegalStateException("calendar offline")
+            coEvery { markers.observe(any()) } returns flowOf(emptyList())
             coEvery { attendance.getPreferredSemester(any(), any(), any(), any(), any()) } coAnswers { pending.await() }
             coEvery { attendance.observeSummary(any()) } returns
                 MutableStateFlow(AcademicSnapshot(data = AttendanceResponse()))
+            coEvery { timetable.observeWeek(any()) } returns MutableStateFlow(AcademicSnapshot())
             val useCase = AttendanceUseCase()
             val viewModel =
                 PlannerViewModel(
-                    attendance, timetable, coordinator, auth, mockk<StudentMarkerRepository>(relaxed = true),
+                    attendance, timetable, coordinator, auth, markers,
                     calendar, useCase, PlannerUseCase(useCase), preferences, network,
                 )
             try {
@@ -80,6 +84,7 @@ class PlannerSelectionReviewTest {
                 coVerify(atLeast = 1) { attendance.observeSummary(AttendanceKey(context, "C1", "Y1")) }
             } finally {
                 viewModel.viewModelScope.cancel()
+                runCurrent()
                 Dispatchers.resetMain()
             }
         }

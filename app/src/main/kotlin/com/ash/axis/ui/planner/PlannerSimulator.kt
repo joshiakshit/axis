@@ -93,8 +93,10 @@ internal fun SimulatorGrid(
     anchorDate: LocalDate?,
     dateTimetable: ImmutableMap<LocalDate, ImmutableList<TimetableSlot>>,
     coveredDates: ImmutableSet<LocalDate>,
+    estimatedDates: ImmutableSet<LocalDate>,
     semesterEndDate: LocalDate?,
     interactionEnabled: Boolean,
+    waitingForSchedule: Boolean,
     onPreview: (LocalDate) -> Unit,
     onMarkAbsent: (LocalDate) -> Unit,
     onShiftMonth: (Int) -> Unit,
@@ -139,7 +141,12 @@ internal fun SimulatorGrid(
                 selectedCount = selectedDates.size,
                 noClassCount = holidays.size,
                 hasPreview = anchorDate != null,
-                interactionEnabled = interactionEnabled,
+                unavailableMessage =
+                    when {
+                        interactionEnabled -> null
+                        waitingForSchedule -> "Waiting for today's schedule before planning."
+                        else -> "Answer today's attendance to start planning."
+                    },
                 onToggleHolidayMode = onToggleHolidayMode,
                 onClear = onClear,
             )
@@ -173,6 +180,7 @@ internal fun SimulatorGrid(
                                 anchorDate = anchorDate,
                                 dateTimetable = dateTimetable,
                                 coveredDates = coveredDates,
+                                estimatedDates = estimatedDates,
                                 semesterEndDate = semesterEndDate,
                                 interactionEnabled = interactionEnabled,
                                 onPreview = onPreview,
@@ -193,7 +201,7 @@ private fun SimulatorControls(
     selectedCount: Int,
     noClassCount: Int,
     hasPreview: Boolean,
-    interactionEnabled: Boolean,
+    unavailableMessage: String?,
     onToggleHolidayMode: () -> Unit,
     onClear: () -> Unit,
 ) {
@@ -230,7 +238,7 @@ private fun SimulatorControls(
     }
     Text(
         when {
-            !interactionEnabled -> "Answer today's attendance to start planning."
+            unavailableMessage != null -> unavailableMessage
             selectedCount > 0 || noClassCount > 0 ->
                 buildString {
                     if (selectedCount > 0) append("$selectedCount skipped")
@@ -259,6 +267,7 @@ private fun SimulatorDayCell(
     anchorDate: LocalDate?,
     dateTimetable: ImmutableMap<LocalDate, ImmutableList<TimetableSlot>>,
     coveredDates: ImmutableSet<LocalDate>,
+    estimatedDates: ImmutableSet<LocalDate>,
     semesterEndDate: LocalDate?,
     interactionEnabled: Boolean,
     onPreview: (LocalDate) -> Unit,
@@ -311,9 +320,10 @@ private fun SimulatorDayCell(
                 append(", preview selected")
             }
             markerTypes.forEach { append(", ${it.label.lowercase()}") }
+            if (date in estimatedDates) append(", weekly schedule estimate")
             if (hasClasses) {
                 append(", has classes")
-            } else if (date in coveredDates) {
+            } else if (date in coveredDates && date !in estimatedDates) {
                 append(", no classes")
             } else {
                 append(", schedule not loaded")

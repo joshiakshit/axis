@@ -120,8 +120,10 @@ fun PlannerScreen(
                             anchorDate = data.anchorDate,
                             dateTimetable = data.dateTimetable,
                             coveredDates = data.coveredDates,
+                            estimatedDates = data.estimatedDates,
                             semesterEndDate = data.semesterEndDate,
-                            interactionEnabled = data.todayAttendance != null,
+                            interactionEnabled = data.todayAttendance != null && LocalDate.now() in data.coveredDates,
+                            waitingForSchedule = LocalDate.now() !in data.coveredDates,
                             onPreview = viewModel::previewDate,
                             onMarkAbsent = viewModel::markAbsent,
                             onShiftMonth = viewModel::shiftSimulatorMonth,
@@ -136,11 +138,28 @@ fun PlannerScreen(
                 item(key = "projected_header", contentType = "projected_header") {
                     if (data.projected.isNotEmpty()) {
                         AppSectionLabel(
-                            if (data.anchorDate != null) {
+                            if (data.projectionCoverage == ProjectionCoverage.ESTIMATE) {
+                                "WEEKLY SCHEDULE ESTIMATE"
+                            } else if (data.anchorDate != null) {
                                 "PROJECTED ON ${data.anchorDate.format(impactDateFormatter).uppercase()}"
                             } else {
                                 "BEST POSSIBLE BY SEMESTER END"
                             },
+                        )
+                    }
+                }
+
+                if (data.projectionCoverage != null && data.projectionCoverage != ProjectionCoverage.COMPLETE) {
+                    item(key = "projection_coverage", contentType = "status") {
+                        Text(
+                            when (data.projectionCoverage) {
+                                ProjectionCoverage.LOADING -> "Loading schedule coverage for this projection."
+                                ProjectionCoverage.FAILED -> "Some schedule weeks could not load. Retry to complete the projection."
+                                ProjectionCoverage.ESTIMATE -> "This projection uses weekly schedule estimates."
+                                ProjectionCoverage.LIMITED -> "This range exceeds planner coverage. Choose a nearer date."
+                                else -> ""
+                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
