@@ -1,6 +1,6 @@
 # Lean app refactor: orchestration plan
 
-Status: corrected agents 04 and 05 are integrated; their combined scoped checks pass. Agent 03 still needs master review before wave 3. See [the wave 2 review](reports/02-master-review.md) for staged acceptance and the shared API and validation work assigned to agent 06. The original [wave 2 baseline](reports/00-wave2-baseline.md) remains fixed.
+Status: corrected agents 04 and 05 are integrated; their combined scoped checks pass. Agent 03 needs the two corrections in [the grades review](reports/03-master-review.md) before wave 3. See [the wave 2 review](reports/02-master-review.md) for staged acceptance and the shared API and validation work assigned to agent 06. The original [wave 2 baseline](reports/00-wave2-baseline.md) remains fixed.
 
 Use GPT-6 Sol at medium reasoning for the seven assignments below. The master planner owns sequencing, shared contracts, integration decisions, and acceptance. Implementation agents do not delegate further.
 
