@@ -2,7 +2,18 @@
 
 Reviewed submissions: `9603ce2f9df7999a28d54cedb387df917f9a5406` (04) and `feb453638aeac6ec285c49e2dd11b106b7f0e1e9` (05).
 
-Initial decision: return both for focused corrections. The original submissions were combined only in `C:/Coding/Axis/axis-lean-wave2-review`, branch `joshi/lean-wave2-review`. The update below supersedes that decision for agent 04. This review does not assess assignment 03.
+Initial decision: return both for focused corrections. The original submissions were combined only in `C:/Coding/Axis/axis-lean-wave2-review`, branch `joshi/lean-wave2-review`. The updates below supersede that decision for agents 04 and 05 at the consumer correction stage. This review does not assess assignment 03.
+
+## Agent 05 correction acceptance, 2026-09-25
+
+- Reviewed final submission: `25eb48df9609ec1dbc2ab85a6be3485a2243b803`. The supplied reset and saved-selection assertions remain unchanged. New fixture stubs cover paths reached after the fixes.
+- Accepted for staged integration. Cherry-picked all seven assignment commits onto `joshi/lean-integration`, ending at `0b4e3398a039a16dc5fa6d2df35ba17468aff18e` before this documentation update.
+- Verified together with accepted agent 04: `:app:testDebugUnitTest` filtered to the academics, attendance, dashboard, daywise, planner, and timetable UI packages plus `PlannerUseCaseTest` and `TimetableUseCaseTest`; then `:app:compileDebugKotlin :app:ktlintCheck :app:detekt`. All passed: 61 tests, no failures, errors, or skips. `git diff --check` passed.
+- Derived timetable weeks now respond to snapshot resets. Planner binds saved IDs before metadata lookup, observes used coverage continuously, removes cleared dates, and distinguishes incomplete, failed, and estimated projection inputs.
+- Agent 06 must replace direct per-week requests with the assigned shared coverage API. `syncCoverage` currently launches every wanted request and `requestWeek` prioritizes each key, so queued required ranges can still be cancelled. This is not accepted final scheduling behavior. The temporary 32-week presentation limit must not become an unexplained permanent loss of supported planner range behavior; bound work and subscriptions while preserving useful requested coverage.
+- `PlannerCoverageViewModelTest` still polls with `Thread.sleep(2)` because computation uses `Dispatchers.Default`. Agent 06 must make dispatch/completion controllable and remove wall-clock polling before final acceptance. Current passes establish the tested outcomes, not deterministic race coverage.
+- Recheck account/range identity after suspending projection calculations before publishing whole-state replacements. `applyCoverageSnapshot`, marker updates, and preview/month actions can suspend during recomputation. Add controlled late-completion tests alongside the shared API work so old computations cannot restore cleared or replaced state.
+- No device evidence was added. Agent 03 remains unreviewed, and no wave 3 launch baseline has been issued.
 
 ## Agent 04 correction acceptance, 2026-09-25
 
@@ -11,7 +22,7 @@ Initial decision: return both for focused corrections. The original submissions 
 - Verified on the integration branch: `:app:testDebugUnitTest` filtered to `com.ash.axis.ui.academics.*`, `com.ash.axis.ui.attendance.*`, `com.ash.axis.ui.dashboard.*`, and `com.ash.axis.ui.daywise.*`, followed by `:app:compileDebugKotlin :app:ktlintCheck :app:detekt`. All passed: 10 tests, no failures or skips. `git diff --check` passed.
 - The original metadata-error escape and stale cleared-demand-error regressions are resolved. Overall and Day-wise tests cover metadata retry and current error presentation.
 - This is consumer correction acceptance, not completed lifecycle acceptance. Agent 06 must still replace temporary selection discovery with shared selection state and validate account-bound error lifetime. In particular, local manual-refresh errors are not consistently cleared on every key transition, and coordinator demand errors are not keyed. An old pending refresh must not publish an error into a new account, semester, or range. Cover these cases while closing the shared selection/error contract; do not retain duplicate error state solely for compatibility.
-- Agent 05 corrections and agent 03 still need master review before a wave 3 launch baseline is issued. Original wave 2 baseline remains unchanged. Device and performance checks remain open.
+- At this acceptance checkpoint, agent 05 corrections and agent 03 still needed review. See the later agent 05 update above for current status. Original wave 2 baseline remains unchanged. Device and performance checks remain open.
 
 ## Reproduction
 
