@@ -23,6 +23,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
@@ -145,24 +147,27 @@ class AttendanceRepository
 
             val results =
                 coroutineScope {
+                    val permits = Semaphore(2)
                     years.map { year ->
                         async {
-                            try {
-                                val options =
-                                    getClasses(admno, brId, year.id, forceRefresh)
-                                        .filter { it.id.isNotBlank() }
-                                        .map { classInfo ->
-                                            SemesterOption(
-                                                yearId = year.id,
-                                                classId = classInfo.id,
-                                                label = classInfo.displayLabel(year),
-                                            )
-                                        }
-                                Result.success(options)
-                            } catch (error: CancellationException) {
-                                throw error
-                            } catch (error: Exception) {
-                                Result.failure(error)
+                            permits.withPermit {
+                                try {
+                                    val options =
+                                        getClasses(admno, brId, year.id, forceRefresh)
+                                            .filter { it.id.isNotBlank() }
+                                            .map { classInfo ->
+                                                SemesterOption(
+                                                    yearId = year.id,
+                                                    classId = classInfo.id,
+                                                    label = classInfo.displayLabel(year),
+                                                )
+                                            }
+                                    Result.success(options)
+                                } catch (error: CancellationException) {
+                                    throw error
+                                } catch (error: Exception) {
+                                    Result.failure(error)
+                                }
                             }
                         }
                     }.awaitAll()
@@ -173,6 +178,8 @@ class AttendanceRepository
                 results.firstNotNullOfOrNull { it.exceptionOrNull() }?.let { throw it }
             }
 
+            requireMetadataAccount(admno, brId)
+
             return options.distinctBy { "${it.yearId}:${it.classId}" }
                 .sortedWith(latestSemesterFirst())
         }
@@ -182,7 +189,8 @@ class AttendanceRepository
             brId: Int,
             forceRefresh: Boolean = false,
         ): List<AcadYear> {
-            val cacheKey = "v2_acad_years_$admno"
+            val account = requireMetadataAccount(admno, brId)
+            val cacheKey = "v3_acad_years_${admno}_${brId}_${account.clientId}"
             if (!forceRefresh) {
                 cacheStore.cached(cacheKey, CachePolicy.ATTENDANCE, acadYearListSerializer)?.let { return it }
             }
@@ -200,7 +208,7 @@ class AttendanceRepository
                                         "method" to "getAcadYear",
                                         "admno" to admno,
                                         "br_id" to brId,
-                                        "client" to Tenants.GU.clientCode,
+                                        "client" to account.clientId,
                                     ),
                                 ),
                         ),
@@ -208,11 +216,13 @@ class AttendanceRepository
 
                 val yearsJson = result.arrayOrObjectValue("AcadYears", "acadYears", "acad_years", "data")
                 val years = json.decodeFromJsonElement(acadYearListSerializer, yearsJson)
+                requireMetadataAccount(admno, brId)
                 cacheStore.store(cacheKey, years, acadYearListSerializer)
                 years
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                requireMetadataAccount(admno, brId)
                 cacheStore.cachedAnyAge(cacheKey, acadYearListSerializer)
                     ?: throw e
             }
@@ -224,7 +234,8 @@ class AttendanceRepository
             year: String,
             forceRefresh: Boolean = false,
         ): List<ClassInfo> {
-            val cacheKey = "v2_classes_${admno}_$year"
+            val account = requireMetadataAccount(admno, brId)
+            val cacheKey = "v3_classes_${admno}_${brId}_${account.clientId}_$year"
             if (!forceRefresh) {
                 cacheStore.cached(cacheKey, CachePolicy.ATTENDANCE, classInfoListSerializer)?.let { return it }
             }
@@ -242,7 +253,7 @@ class AttendanceRepository
                                         "method" to "getclasses",
                                         "admno" to admno,
                                         "br_id" to brId,
-                                        "client" to Tenants.GU.clientCode,
+                                        "client" to account.clientId,
                                         "year" to year,
                                         "curyear" to year,
                                     ),
@@ -252,15 +263,23 @@ class AttendanceRepository
 
                 val classesJson = result.arrayOrObjectValue("classes", "Classes", "class", "data")
                 val classes = json.decodeFromJsonElement(classInfoListSerializer, classesJson)
+                requireMetadataAccount(admno, brId)
                 cacheStore.store(cacheKey, classes, classInfoListSerializer)
                 classes
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                requireMetadataAccount(admno, brId)
                 cacheStore.cachedAnyAge(cacheKey, classInfoListSerializer)
                     ?: throw e
             }
         }
+
+        private fun requireMetadataAccount(
+            admno: String,
+            brId: Int,
+        ) = authRepository.getUserInfo()?.takeIf { it.admno == admno && it.brId == brId && it.clientId.isNotBlank() }
+            ?: error("Academic request account changed")
 
         suspend fun getAttendance(
             admno: String,
@@ -284,24 +303,6 @@ class AttendanceRepository
                 cacheStore.cachedAnyAge(cacheKey, AttendanceResponse.serializer())
                     ?: throw e
             }
-        }
-
-        suspend fun getDaywiseAttendance(
-            admno: String,
-            brId: Int,
-            year: String,
-            fromDate: String,
-            toDate: String,
-            forceRefresh: Boolean = false,
-        ): DaywiseResponse {
-            val cacheKey = "v2_daywise_${admno}_${year}_${fromDate}_$toDate"
-            if (!forceRefresh) {
-                cacheStore.cached(cacheKey, CachePolicy.DAYWISE, DaywiseResponse.serializer())?.let { return it }
-            }
-
-            val daywise = fetchDaywise(admno, brId, year, fromDate, toDate)
-            cacheStore.store(cacheKey, daywise, DaywiseResponse.serializer())
-            return daywise
         }
 
         private suspend fun fetchAttendance(
@@ -400,6 +401,11 @@ class AttendanceRepository
         ): QrScanResult {
             val collegeId = clientId.ifBlank { Tenants.GU.id }
             authRepository.refreshTokenIfNeeded()
+            val active = authRepository.getUserInfo()
+            check(
+                active != null && active.admno == admno && active.brId == brId &&
+                    (clientId.isBlank() || active.clientId == clientId),
+            ) { "QR submission account changed" }
             val body =
                 studentApi.jsonBody(
                     "data" to rawQr,

@@ -14,6 +14,30 @@ import org.junit.jupiter.api.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class AcademicResourceTest {
     @Test
+    fun `cache read failure stays on its resource key`() =
+        runTest {
+            var fetches = 0
+            val resource =
+                AcademicResource<String, String>(
+                    backgroundScope,
+                    { key -> if (key == "failed") error("cache unavailable") else null },
+                    { key ->
+                        fetches++
+                        key
+                    },
+                    { _, _ -> 200L },
+                )
+
+            val failed = resource.request("failed")
+            val healthy = resource.request("healthy")
+            runCurrent()
+
+            assertEquals("cache unavailable", failed.value.error?.message)
+            assertEquals("healthy", healthy.value.data)
+            assertEquals(1, fetches)
+        }
+
+    @Test
     fun `stale cache publishes before shared blocked refresh`() =
         runTest {
             val response = CompletableDeferred<String>()
@@ -249,7 +273,7 @@ class AcademicResourceTest {
 
             resource.request("first")
             resource.request("second")
-            resource.request("old queued")
+            resource.request("old queued", speculative = true)
             val visible = resource.request("visible")
             runCurrent()
             assertEquals(listOf("first", "second"), calls)

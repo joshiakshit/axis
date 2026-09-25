@@ -12,15 +12,19 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.temporal.TemporalAdjusters
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -28,9 +32,16 @@ enum class AcademicDestination { HOME, ATTENDANCE, TIMETABLE, DAYWISE, PLANNER, 
 
 data class DaywiseRange(val year: String, val fromDate: String, val toDate: String)
 
+data class AcademicSemesterSelection(
+    val context: StudentRequestContext? = null,
+    val option: SemesterOption? = null,
+    val loading: Boolean = false,
+    val error: Throwable? = null,
+)
+
 /** Starts only the current visible demand and the two core warmup loads. */
 @Singleton
-@Suppress("TooGenericExceptionCaught")
+@Suppress("TooGenericExceptionCaught", "TooManyFunctions", "ComplexCondition")
 class AcademicDataCoordinator
     @Inject
     constructor(
@@ -43,6 +54,8 @@ class AcademicDataCoordinator
         private var active: StudentRequestContext? = null
         private val mutableActiveContext = MutableStateFlow<StudentRequestContext?>(null)
         val activeContext: StateFlow<StudentRequestContext?> = mutableActiveContext
+        private val mutableSelectedSemester = MutableStateFlow(AcademicSemesterSelection())
+        val selectedSemester: StateFlow<AcademicSemesterSelection> = mutableSelectedSemester
         private val mutableAttendanceDemandError = MutableStateFlow<Throwable?>(null)
         val attendanceDemandError: StateFlow<Throwable?> = mutableAttendanceDemandError
         private val mutableTimetableDemandError = MutableStateFlow<Throwable?>(null)
@@ -51,7 +64,19 @@ class AcademicDataCoordinator
         val daywiseDemandError: StateFlow<Throwable?> = mutableDaywiseDemandError
         private var semester: SemesterOption? = null
         private var currentWeek: Pair<String, String>? = null
+        private var visibleWeek: Pair<String, String>? = null
+        private var destination = AcademicDestination.HOME
         private var generation = 0L
+        private var selectionVersion = 0L
+        private var summaryDemand = 0L
+        private var weekDemand = 0L
+        private var daywiseDemand = 0L
+        private val mutableTransition = MutableStateFlow(0L)
+        val transition: StateFlow<Long> = mutableTransition
+        private val requiredQueue = LinkedHashSet<TimetableKey>()
+        private val prefetchQueue = LinkedHashSet<TimetableKey>()
+        private var coverageWorker: Job? = null
+        private var pendingQrOrigin: StudentRequestContext? = null
 
         suspend fun activate(
             context: StudentRequestContext,
@@ -64,13 +89,29 @@ class AcademicDataCoordinator
                 attendance.deactivateAcademicData()
                 timetable.deactivateAcademicData()
                 generation++
+                mutableTransition.value = generation
+                coverageWorker?.cancel()
+                coverageWorker = null
+                requiredQueue.clear()
+                prefetchQueue.clear()
                 active = context
                 mutableActiveContext.value = context
                 semester = selectedSemester
+                selectionVersion++
                 currentWeek = weekRange(weekStart)
+                visibleWeek = currentWeek
+                this.destination = destination
+                mutableSelectedSemester.value = AcademicSemesterSelection(context, selectedSemester)
                 mutableAttendanceDemandError.value = null
                 mutableTimetableDemandError.value = null
                 mutableDaywiseDemandError.value = null
+                summaryDemand++
+                weekDemand++
+                daywiseDemand++
+                if (pendingQrOrigin?.let { sameAccount(it, context) } == true) {
+                    attendance.invalidateDaywiseForAccount(context)
+                    selectedSemester?.let { applyPendingQr(context, it) }
+                }
             }
             when (destination) {
                 AcademicDestination.ATTENDANCE -> attendanceVisible()
@@ -88,35 +129,125 @@ class AcademicDataCoordinator
         suspend fun deactivate() {
             mutex.withLock {
                 generation++
+                mutableTransition.value = generation
+                coverageWorker?.cancel()
+                coverageWorker = null
+                requiredQueue.clear()
+                prefetchQueue.clear()
                 active = null
                 mutableActiveContext.value = null
                 semester = null
+                selectionVersion++
                 currentWeek = null
+                visibleWeek = null
+                destination = AcademicDestination.HOME
+                mutableSelectedSemester.value = AcademicSemesterSelection()
                 mutableAttendanceDemandError.value = null
                 mutableTimetableDemandError.value = null
                 mutableDaywiseDemandError.value = null
+                summaryDemand++
+                weekDemand++
+                daywiseDemand++
                 attendance.deactivateAcademicData()
                 timetable.deactivateAcademicData()
             }
         }
 
         suspend fun selectSemester(option: SemesterOption) {
-            mutex.withLock { semester = option }
-            attendanceVisible()
+            mutex.withLock {
+                val context = active ?: return
+                semester = option
+                selectionVersion++
+                mutableSelectedSemester.value = AcademicSemesterSelection(context, option)
+                mutableAttendanceDemandError.value = null
+                mutableDaywiseDemandError.value = null
+                summaryDemand++
+                daywiseDemand++
+                applyPendingQr(context, option)
+            }
+            safeSummary()
+        }
+
+        suspend fun discoverSemester(
+            savedYear: String = "",
+            savedClass: String = "",
+        ) {
+            val (context, observed) =
+                mutex.withLock {
+                    val context = active ?: return
+                    selectionVersion++
+                    mutableSelectedSemester.value = AcademicSemesterSelection(context, semester, loading = true)
+                    context to (generation to selectionVersion)
+                }
+            try {
+                val option = attendance.getPreferredSemester(context.admno, context.brId, savedYear, savedClass)
+                mutex.withLock {
+                    val current = active ?: return
+                    if (!sameAccount(current, context) || generation != observed.first || selectionVersion != observed.second) return
+                    semester = option
+                    mutableSelectedSemester.value = AcademicSemesterSelection(current, option)
+                    applyPendingQr(current, option)
+                }
+                safeSummary()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                mutex.withLock {
+                    val current = active
+                    if (current != null && sameAccount(current, context) && generation == observed.first &&
+                        selectionVersion == observed.second
+                    ) {
+                        mutableSelectedSemester.value = AcademicSemesterSelection(current, semester, error = error)
+                    }
+                }
+            }
         }
 
         suspend fun attendanceVisible() {
-            startBoth(::safeSummary, ::safeWeek)
+            mutex.withLock { destination = AcademicDestination.ATTENDANCE }
+            startBoth(::safeSummary, { safeWeek(visible = false) })
         }
 
         suspend fun timetableVisible(weekStart: LocalDate) {
-            mutex.withLock { currentWeek = weekRange(weekStart) }
-            startBoth(::safeWeek, ::safeSummary)
+            mutex.withLock {
+                destination = AcademicDestination.TIMETABLE
+                visibleWeek = weekRange(weekStart)
+            }
+            startBoth({ safeWeek(visible = true) }, ::safeSummary)
+            prefetchAdjacent(weekStart)
         }
 
-        suspend fun homeVisible() = warmCore()
+        suspend fun plannerCoverage(weeks: Collection<LocalDate>) {
+            mutex.withLock {
+                val context = active?.takeIf { it.academicYear.isNotBlank() } ?: return
+                weeks.forEach { week ->
+                    requiredQueue += TimetableKey(context, week.toString(), week.plusDays(6).toString())
+                }
+                startCoverageWorker()
+            }
+        }
+
+        suspend fun prefetchAdjacent(weekStart: LocalDate) {
+            mutex.withLock {
+                val context = active?.takeIf { it.academicYear.isNotBlank() } ?: return
+                prefetchQueue.clear()
+                listOf(weekStart.minusWeeks(1), weekStart.plusWeeks(1)).forEach { week ->
+                    prefetchQueue += TimetableKey(context, week.toString(), week.plusDays(6).toString())
+                }
+                startCoverageWorker()
+            }
+        }
+
+        suspend fun homeVisible(weekStart: LocalDate = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))) {
+            mutex.withLock {
+                destination = AcademicDestination.HOME
+                currentWeek = weekRange(weekStart)
+            }
+            warmCore()
+        }
 
         suspend fun otherVisible() {
+            mutex.withLock { destination = AcademicDestination.OTHER }
             scope.launch { warmCore() }
         }
 
@@ -125,13 +256,20 @@ class AcademicDataCoordinator
             fromDate: String,
             toDate: String,
         ) {
+            mutex.withLock { destination = AcademicDestination.DAYWISE }
             startBoth(
                 { safeDaywise(year, fromDate, toDate) },
                 { warmCore() },
             )
         }
 
-        suspend fun plannerVisible(weekStart: LocalDate) = timetableVisible(weekStart)
+        suspend fun plannerVisible(weekStart: LocalDate) {
+            mutex.withLock {
+                destination = AcademicDestination.PLANNER
+                currentWeek = weekRange(weekStart)
+            }
+            startBoth({ safeWeek(visible = false) }, ::safeSummary)
+        }
 
         suspend fun refreshAttendance() = requestSummary(force = true)
 
@@ -153,32 +291,115 @@ class AcademicDataCoordinator
             mutex.withLock {
                 val current = active ?: return
                 if (generation != observedGeneration || current != before || !sameAccount(current, refreshed)) return
+                if (current != refreshed) {
+                    generation++
+                    mutableTransition.value = generation
+                    coverageWorker?.cancel()
+                    coverageWorker = null
+                    requiredQueue.clear()
+                    prefetchQueue.clear()
+                }
                 active = refreshed
+                mutableSelectedSemester.value = mutableSelectedSemester.value.copy(context = refreshed)
                 mutableActiveContext.value = refreshed
-                val week = currentWeek ?: return
+                val week = if (destination == AcademicDestination.TIMETABLE) visibleWeek else currentWeek
+                if (week == null) return
                 timetable.requestWeek(TimetableKey(refreshed, week.first, week.second), force = true)
             }
         }
 
         suspend fun qrSucceeded(origin: StudentRequestContext) {
             mutex.withLock {
-                val context = active ?: return
+                val context = active
+                if (context == null) {
+                    val user = auth.getUserInfo() ?: return
+                    if (user.admno == origin.admno && user.brId == origin.brId && user.clientId == origin.clientId) {
+                        pendingQrOrigin = origin
+                    }
+                    return
+                }
                 if (!sameAccount(context, origin)) return
-                semester?.let { attendance.invalidateSummary(AttendanceKey(context, it.classId, it.yearId)) }
+                val selected = semester
+                if (selected == null) {
+                    pendingQrOrigin = origin
+                } else {
+                    attendance.invalidateSummary(AttendanceKey(context, selected.classId, selected.yearId))
+                }
                 attendance.invalidateDaywiseForAccount(context)
+            }
+        }
+
+        private suspend fun applyPendingQr(
+            context: StudentRequestContext,
+            option: SemesterOption,
+        ) {
+            if (pendingQrOrigin?.let { sameAccount(it, context) } == true) {
+                pendingQrOrigin = null
+                attendance.invalidateSummary(AttendanceKey(context, option.classId, option.yearId))
             }
         }
 
         suspend fun clearAcademicCache() {
             mutex.withLock {
                 generation++
+                mutableTransition.value = generation
+                summaryDemand++
+                weekDemand++
+                daywiseDemand++
+                mutableAttendanceDemandError.value = null
+                mutableTimetableDemandError.value = null
+                mutableDaywiseDemandError.value = null
+                coverageWorker?.cancel()
+                coverageWorker = null
+                requiredQueue.clear()
+                prefetchQueue.clear()
                 attendance.clearCache()
                 timetable.clearCache()
             }
         }
 
+        @Suppress("CyclomaticComplexMethod")
+        private fun startCoverageWorker() {
+            if (coverageWorker?.isActive == true) return
+            val owner = generation
+            coverageWorker =
+                scope.launch {
+                    while (true) {
+                        val next =
+                            mutex.withLock {
+                                if (generation != owner) return@launch
+                                val required = requiredQueue.firstOrNull()
+                                if (required != null) {
+                                    requiredQueue.remove(required)
+                                    required to true
+                                } else {
+                                    val prefetch = prefetchQueue.firstOrNull() ?: return@launch
+                                    prefetchQueue.remove(prefetch)
+                                    prefetch to false
+                                }
+                            }
+                        val (key, required) = next
+                        val visible = mutex.withLock { visibleWeek == (key.startDate to key.endDate) }
+                        if (!required && visible) continue
+                        try {
+                            if (!required) {
+                                val visibleKey = mutex.withLock { visibleWeek?.let { TimetableKey(key.context, it.first, it.second) } }
+                                visibleKey?.let { timetable.observeWeek(it).first { snapshot -> !snapshot.refreshing } }
+                            }
+                            val snapshot =
+                                if (required) timetable.requestRequiredWeek(key) else timetable.requestPrefetchWeek(key)
+                            snapshot.first { !it.refreshing }
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (_: Exception) {
+                            // The keyed repository snapshot owns range errors.
+                        }
+                    }
+                }
+        }
+
         private suspend fun warmCore() {
-            startBoth(::safeSummary, ::safeWeek)
+            startBoth(::safeSummary, { safeWeek(visible = false) })
         }
 
         private suspend fun startBoth(
@@ -194,26 +415,42 @@ class AcademicDataCoordinator
         }
 
         private suspend fun safeSummary() {
-            val observedGeneration = mutex.withLock { generation }
+            val observed =
+                mutex.withLock {
+                    mutableAttendanceDemandError.value = null
+                    generation to ++summaryDemand
+                }
             try {
                 requestSummary()
-                mutex.withLock { if (generation == observedGeneration) mutableAttendanceDemandError.value = null }
+                mutex.withLock {
+                    if (generation == observed.first && summaryDemand == observed.second) mutableAttendanceDemandError.value = null
+                }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                mutex.withLock { if (generation == observedGeneration) mutableAttendanceDemandError.value = error }
+                mutex.withLock {
+                    if (generation == observed.first && summaryDemand == observed.second) mutableAttendanceDemandError.value = error
+                }
             }
         }
 
-        private suspend fun safeWeek() {
-            val observedGeneration = mutex.withLock { generation }
+        private suspend fun safeWeek(visible: Boolean) {
+            val observed =
+                mutex.withLock {
+                    mutableTimetableDemandError.value = null
+                    generation to ++weekDemand
+                }
             try {
-                requestCurrentWeek()
-                mutex.withLock { if (generation == observedGeneration) mutableTimetableDemandError.value = null }
+                requestWeek(visible)
+                mutex.withLock {
+                    if (generation == observed.first && weekDemand == observed.second) mutableTimetableDemandError.value = null
+                }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                mutex.withLock { if (generation == observedGeneration) mutableTimetableDemandError.value = error }
+                mutex.withLock {
+                    if (generation == observed.first && weekDemand == observed.second) mutableTimetableDemandError.value = error
+                }
             }
         }
 
@@ -222,17 +459,25 @@ class AcademicDataCoordinator
             fromDate: String,
             toDate: String,
         ) {
-            val observedGeneration = mutex.withLock { generation }
+            val observed =
+                mutex.withLock {
+                    mutableDaywiseDemandError.value = null
+                    generation to ++daywiseDemand
+                }
             try {
                 mutex.withLock {
                     val context = active ?: return
                     attendance.requestDaywise(DaywiseKey(context, year, fromDate, toDate))
                 }
-                mutex.withLock { if (generation == observedGeneration) mutableDaywiseDemandError.value = null }
+                mutex.withLock {
+                    if (generation == observed.first && daywiseDemand == observed.second) mutableDaywiseDemandError.value = null
+                }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                mutex.withLock { if (generation == observedGeneration) mutableDaywiseDemandError.value = error }
+                mutex.withLock {
+                    if (generation == observed.first && daywiseDemand == observed.second) mutableDaywiseDemandError.value = error
+                }
             }
         }
 
@@ -244,7 +489,7 @@ class AcademicDataCoordinator
             }
         }
 
-        private suspend fun requestCurrentWeek() {
+        private suspend fun requestWeek(visible: Boolean) {
             val state = mutex.withLock { Pair(active ?: return, generation) }
             val context =
                 if (state.first.academicYear.isNotBlank()) {
@@ -254,13 +499,15 @@ class AcademicDataCoordinator
                     mutex.withLock {
                         if (generation != state.second || active != state.first || !sameAccount(state.first, resolved)) return
                         active = resolved
+                        mutableSelectedSemester.value = mutableSelectedSemester.value.copy(context = resolved)
                         mutableActiveContext.value = resolved
                     }
                     resolved
                 }
             mutex.withLock {
                 if (generation != state.second || active != context) return
-                val week = currentWeek ?: return
+                val week = if (visible) visibleWeek else currentWeek
+                if (week == null) return
                 timetable.requestWeek(TimetableKey(context, week.first, week.second))
             }
         }

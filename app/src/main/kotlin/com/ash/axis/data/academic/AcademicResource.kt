@@ -21,7 +21,7 @@ data class AcademicSnapshot<T>(
     val freshness: CacheFreshness? = null,
 )
 
-@Suppress("TooGenericExceptionCaught", "ReturnCount")
+@Suppress("TooGenericExceptionCaught", "ReturnCount", "CyclomaticComplexMethod", "ComplexCondition")
 class AcademicResource<K, T>(
     private val scope: CoroutineScope,
     private val read: suspend (K) -> CachedResult<T>?,
@@ -35,6 +35,7 @@ class AcademicResource<K, T>(
         var forceAfterLoad = false
         var jobForced = false
         var started = false
+        var speculative = false
     }
 
     private val mutex = Mutex()
@@ -50,10 +51,24 @@ class AcademicResource<K, T>(
     suspend fun request(
         key: K,
         force: Boolean = false,
+        speculative: Boolean = false,
     ): StateFlow<AcademicSnapshot<T>> {
         val state = observe(key)
         val observed = mutex.withLock { entries[key] to invalidationEpoch }
-        val cached = read(key)
+        val cached =
+            try {
+                read(key)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                mutex.withLock {
+                    val entry = entries[key]
+                    if (entry != null && entry === observed.first && invalidationEpoch == observed.second) {
+                        entry.state.value = entry.state.value.copy(refreshing = false, error = error)
+                    }
+                }
+                return state
+            }
         mutex.withLock {
             val entry = entries[key] ?: return state
             if (entry !== observed.first || invalidationEpoch != observed.second) return state
@@ -68,10 +83,12 @@ class AcademicResource<K, T>(
                 entry.state.value = entry.state.value.copy(freshness = CacheFreshness.STALE)
             }
             if (entry.job?.isActive == true) {
+                if (!speculative) entry.speculative = false
                 if (force && !entry.jobForced) entry.forceAfterLoad = true
                 return state
             }
             if (!force && cached?.freshness == CacheFreshness.FRESH) return state
+            entry.speculative = speculative
             launch(key, entry, force)
         }
         return state
@@ -80,7 +97,7 @@ class AcademicResource<K, T>(
     suspend fun prioritize(key: K) {
         mutex.withLock {
             entries.forEach { (queuedKey, entry) ->
-                if (queuedKey != key && entry.job?.isActive == true && !entry.started) {
+                if (queuedKey != key && entry.speculative && entry.job?.isActive == true && !entry.started) {
                     entry.generation++
                     entry.job?.cancel()
                     entry.job = null

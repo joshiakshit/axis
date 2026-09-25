@@ -3,14 +3,17 @@ package com.ash.axis.data.academic
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
 import com.ash.axis.data.repository.TimetableData
+import com.ash.axis.data.repository.TimetableKey
 import com.ash.axis.data.repository.TimetableRepository
 import com.ash.axis.domain.model.AttendanceResponse
 import com.ash.axis.domain.model.DaywiseResponse
 import com.ash.axis.domain.model.SemesterOption
 import com.ash.axis.domain.model.StudentRequestContext
+import com.ash.axis.domain.model.UserInfo
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.coVerifyOrder
+import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -27,6 +30,150 @@ import java.time.LocalDate
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AcademicDataCoordinatorTest {
+    @Test
+    fun `home returns to current week after visiting another timetable week`() =
+        runTest {
+            val attendance = mockk<AttendanceRepository>(relaxed = true)
+            val timetable = mockk<TimetableRepository>(relaxed = true)
+            val auth = mockk<AuthRepository>()
+            val context = StudentRequestContext("21001", 11, "clientMixedCase", "2026-2027")
+            val current = LocalDate.parse("2026-09-07")
+            val future = current.plusWeeks(8)
+            coEvery { auth.requireStudentRequestContext(true) } returns context
+            coEvery { timetable.requestWeek(any(), any()) } returns MutableStateFlow(AcademicSnapshot<TimetableData>())
+            val coordinator = AcademicDataCoordinator(attendance, timetable, auth)
+
+            coordinator.activate(context, null, current)
+            coordinator.timetableVisible(future)
+            coordinator.homeVisible(current)
+            coordinator.refreshTimetable()
+
+            coVerify(atLeast = 2) {
+                timetable.requestWeek(TimetableKey(context, current.toString(), current.plusDays(6).toString()), any())
+            }
+            coordinator.deactivate()
+        }
+
+    @Test
+    fun `selected semester changes atomically with account`() =
+        runTest {
+            val attendance = mockk<AttendanceRepository>(relaxed = true)
+            val timetable = mockk<TimetableRepository>(relaxed = true)
+            val auth = mockk<AuthRepository>()
+            val first = StudentRequestContext("21001", 11, "clientMixedCase", "2026-2027")
+            val second = first.copy(admno = "21002")
+            val option = SemesterOption("2025-2026", "C1", "Semester 1")
+            val coordinator = AcademicDataCoordinator(attendance, timetable, auth)
+
+            coordinator.activate(first, option, LocalDate.parse("2026-09-07"))
+            assertEquals(first, coordinator.selectedSemester.value.context)
+            assertEquals(option, coordinator.selectedSemester.value.option)
+            coordinator.activate(second, null, LocalDate.parse("2026-09-07"))
+            assertEquals(second, coordinator.selectedSemester.value.context)
+            assertNull(coordinator.selectedSemester.value.option)
+            coordinator.deactivate()
+        }
+
+    @Test
+    fun `required planner weeks continue after a new visible week`() =
+        runTest {
+            val attendance = mockk<AttendanceRepository>(relaxed = true)
+            val timetable = mockk<TimetableRepository>(relaxed = true)
+            val auth = mockk<AuthRepository>()
+            val context = StudentRequestContext("21001", 11, "clientMixedCase", "2026-2027")
+            val first = LocalDate.parse("2026-09-07")
+            val second = first.plusWeeks(1)
+            val pending = MutableStateFlow(AcademicSnapshot<TimetableData>(refreshing = true))
+            val firstStarted = CompletableDeferred<Unit>()
+            val secondStarted = CompletableDeferred<Unit>()
+            coEvery { timetable.requestWeek(any(), any()) } returns MutableStateFlow(AcademicSnapshot())
+            coEvery { timetable.requestRequiredWeek(any()) } coAnswers {
+                if (firstArg<TimetableKey>().startDate == first.toString()) firstStarted.complete(Unit) else secondStarted.complete(Unit)
+                pending
+            }
+            val coordinator = AcademicDataCoordinator(attendance, timetable, auth)
+
+            coordinator.activate(context, null, first)
+            coordinator.plannerCoverage(listOf(first, second))
+            firstStarted.await()
+            coordinator.timetableVisible(first.plusWeeks(4))
+            pending.value = AcademicSnapshot()
+            secondStarted.await()
+
+            coVerify(exactly = 1) {
+                timetable.requestRequiredWeek(TimetableKey(context, second.toString(), second.plusDays(6).toString()))
+            }
+            coordinator.deactivate()
+        }
+
+    @Test
+    fun `confirmed QR invalidates only the originating active account`() =
+        runTest {
+            val attendance = mockk<AttendanceRepository>(relaxed = true)
+            val timetable = mockk<TimetableRepository>(relaxed = true)
+            val coordinator = AcademicDataCoordinator(attendance, timetable, mockk<AuthRepository>())
+            val first = StudentRequestContext("A", 1, "Client", "2026")
+            val second = first.copy(admno = "B")
+            val option = SemesterOption("Y1", "C1", "")
+            val monday = LocalDate.parse("2026-09-07")
+
+            coordinator.activate(first, option, monday)
+            coordinator.activate(second, option, monday)
+            coordinator.qrSucceeded(first)
+            coVerify(exactly = 0) { attendance.invalidateSummary(any()) }
+            coVerify(exactly = 0) { attendance.invalidateDaywiseForAccount(any()) }
+
+            coordinator.qrSucceeded(second)
+            coVerify(exactly = 1) { attendance.invalidateSummary(com.ash.axis.data.repository.AttendanceKey(second, "C1", "Y1")) }
+            coVerify(exactly = 1) { attendance.invalidateDaywiseForAccount(second) }
+            coordinator.deactivate()
+        }
+
+    @Test
+    fun `late semester discovery cannot replace a manual selection`() =
+        runTest {
+            val attendance = mockk<AttendanceRepository>(relaxed = true)
+            val timetable = mockk<TimetableRepository>(relaxed = true)
+            val coordinator = AcademicDataCoordinator(attendance, timetable, mockk<AuthRepository>())
+            val context = StudentRequestContext("A", 1, "Client", "2026")
+            val pending = CompletableDeferred<SemesterOption>()
+            val started = CompletableDeferred<Unit>()
+            coEvery { attendance.getPreferredSemester(any(), any(), any(), any(), any()) } coAnswers {
+                started.complete(Unit)
+                pending.await()
+            }
+            coordinator.activate(context, null, LocalDate.parse("2026-09-07"))
+            val discovery = async { coordinator.discoverSemester() }
+            started.await()
+            val chosen = SemesterOption("Y2", "C2", "Chosen")
+            coordinator.selectSemester(chosen)
+            pending.complete(SemesterOption("Y1", "C1", "Old"))
+            discovery.await()
+
+            assertEquals(chosen, coordinator.selectedSemester.value.option)
+            coordinator.deactivate()
+        }
+
+    @Test
+    fun `QR success before session activation invalidates saved selection on activation`() =
+        runTest {
+            val attendance = mockk<AttendanceRepository>(relaxed = true)
+            val timetable = mockk<TimetableRepository>(relaxed = true)
+            val auth = mockk<AuthRepository>()
+            val context = StudentRequestContext("A", 1, "Client", "2026")
+            every { auth.getUserInfo() } returns UserInfo("A", 1, "Alex", "", "", "Client")
+            val coordinator = AcademicDataCoordinator(attendance, timetable, auth)
+
+            coordinator.qrSucceeded(context)
+            coordinator.activate(context, SemesterOption("Y1", "C1", ""), LocalDate.parse("2026-09-07"))
+
+            coVerify(exactly = 1) {
+                attendance.invalidateSummary(com.ash.axis.data.repository.AttendanceKey(context, "C1", "Y1"))
+            }
+            coVerify(exactly = 1) { attendance.invalidateDaywiseForAccount(context) }
+            coordinator.deactivate()
+        }
+
     @Test
     fun `resolved profile year is published without fabricating an attendance year`() =
         runTest {

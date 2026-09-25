@@ -33,6 +33,20 @@ import retrofit2.Response
 
 class AttendanceRepositoryTest {
     @Test
+    fun `semester metadata cannot read another active account cache`() =
+        runTest {
+            val authRepository = mockk<AuthRepository>()
+            val cacheDao = mockk<CacheDao>()
+            every { authRepository.getUserInfo() } returns UserInfo("other", 1, "Other", "", "", "Client")
+            val repository = AttendanceRepository(mockk<ICloudEmsApi>(), mockk<QrAttendanceApi>(), cacheDao, authRepository, Json)
+
+            val failure = runCatching { repository.getAcadYears("21001", 1) }.exceptionOrNull()
+
+            assertTrue(failure is IllegalStateException)
+            coVerify(exactly = 0) { cacheDao.get(any()) }
+        }
+
+    @Test
     fun `observable summary does not hydrate unscoped v2 attendance data`() =
         runBlocking {
             val api = mockk<ICloudEmsApi>()
@@ -162,6 +176,7 @@ class AttendanceRepositoryTest {
             val body = slot<RequestBody>()
             var submissionStarted = false
             coEvery { authRepository.refreshTokenIfNeeded() } returns "token"
+            every { authRepository.getUserInfo() } returns UserInfo("21001", 1, "Student", "", "", "clientMixedCase")
             coEvery { qrApi.sendScanQR(capture(body)) } answers {
                 assertTrue(submissionStarted)
                 Response.success("{}".toResponseBody())
@@ -216,6 +231,24 @@ class AttendanceRepositoryTest {
             assertTrue(failure is SessionExpiredException)
             assertEquals(QrStage.AUTHENTICATION, diagnostics.state.value.stage)
             assertTrue(lines.none { it.contains("stage=submission") })
+            coVerify(exactly = 0) { qrApi.sendScanQR(any()) }
+        }
+
+    @Test
+    fun `account change during QR token refresh prevents submission`() =
+        runTest {
+            val qrApi = mockk<QrAttendanceApi>()
+            val authRepository = mockk<AuthRepository>()
+            coEvery { authRepository.refreshTokenIfNeeded() } returns "new account token"
+            every { authRepository.getUserInfo() } returns UserInfo("other", 1, "Other", "", "", "clientMixedCase")
+            val repository = AttendanceRepository(mockk<ICloudEmsApi>(), qrApi, mockk<CacheDao>(), authRepository, Json)
+
+            val failure =
+                runCatching {
+                    repository.sendScanQR("qr", "21001", "student@example.com", 1, null, null, clientId = "clientMixedCase")
+                }.exceptionOrNull()
+
+            assertTrue(failure is IllegalStateException)
             coVerify(exactly = 0) { qrApi.sendScanQR(any()) }
         }
 }
