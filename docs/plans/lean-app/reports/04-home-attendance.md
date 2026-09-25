@@ -5,6 +5,8 @@
 - Launch baseline: `acb90da4df7f2148c0d53420da2c67a5d322aa68`.
 - Source and test commit: `2a8a08574b30f58eea46950755537fedd7f2c0f5`.
 - Follow-up commit: `b26d8b40a95644aa377b47b3181df96b147e857c`.
+- Review regression tests cherry-picked as `f066ddee3a0171b32b5e0c506b518442362c6533` from `f18a954da7b1680065db1a18c52feb82c7be3016`.
+- Review corrections: `baae244807499e69480b5db8920506aafaaa3a5d`.
 - Changed only `ui/dashboard/*`, `ui/attendance/*`, `ui/daywise/*`, `ui/academics/*`, their tests, and this report.
 - No repository, coordinator, shared UI, or lifecycle files changed. No public data API was added.
 
@@ -24,6 +26,13 @@
 - Removed direct screen calls to `getAttendance`, `getTimetable`, `getDaywiseAttendance`, and profile refresh.
 - `getPreferredSemester` remains a compatibility dependency for the selected key on blank settings and for Overall's display label. Saved year and class IDs bind snapshots without an option lookup in Home and Day-wise. Overall resolves the label after binding its saved key.
 
+## Master review corrections
+
+- Semester discovery now publishes loading, selected option, and error as consumer state. Non-cancellation failures show an error and leave collectors active. Refresh retries missing metadata; a selection change also retries. Cancellation still propagates.
+- Home, Overall, and Day-wise derive displayed errors from current selection, snapshot, coordinator demand, and manual-refresh sources. Clearing one source removes its stale message without hiding another current failure.
+- Account and selected-key transitions clear old derived counts, subjects, forecasts, dates, timestamps, and errors before binding the new key. A label update for the same key does not clear saved content.
+- The two supplied Home assertions remain unchanged. Their test cleanup waits for coroutine cancellation before resetting the test Main dispatcher.
+
 ## Integration wiring for agent 06 and API gap for the master
 
 - Activate the coordinator once with the matching account, selected semester, and current week before expecting these screens to load. Deactivate before account switch or logout. Do not activate from a screen.
@@ -34,8 +43,8 @@
 ## Checks and limits
 
 - `:app:compileDebugKotlin :app:compileDebugUnitTestKotlin`: passed.
-- Four targeted test classes: 6 tests passed. They cover saved selection before option lookup, account switch, partial Home failure, presentation preference recompute without requests, manual refresh calls, and Day-wise range demand and retained data after failure.
+- Seven targeted test classes: 10 tests passed. They cover the original behaviors, both supplied Home regressions, metadata retry on Overall and Day-wise, demand-error recovery without snapshot changes, and preference or selected-key changes during errors.
 - `:app:ktlintCheck :app:detekt`: passed. `git diff --check`: passed.
 - `adb devices`: no connected device. Screenshots, empty/error visual review, large-text checks, and frame checks were not run.
-- Source delta against launch baseline: +547 / -524 production lines, net +23. Test delta: +293 / -0 lines, net +293. The production increase is mainly independent snapshot presentation and the temporary semester fallback.
+- Source delta against launch baseline: +692 / -524 production lines, net +168. Test delta: +624 / -0 lines, net +624. The production increase includes explicit error-source state and the temporary semester fallback.
 - Integrated lifecycle, settings, QR, account isolation, and device acceptance remain for agents 06 and 07.
