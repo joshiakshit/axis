@@ -9,7 +9,7 @@ import androidx.compose.material.icons.automirrored.filled.FactCheck
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.EditCalendar
 import androidx.compose.material.icons.filled.QrCodeScanner
-import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -23,16 +23,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.ash.axis.ui.academics.AcademicsScreen
-import com.ash.axis.ui.account.AccountSwitcherSheet
 import com.ash.axis.ui.dashboard.DashboardScreen
-import com.ash.axis.ui.grades.GradesScreen
-import com.ash.axis.ui.notifications.NotificationsScreen
-import com.ash.axis.ui.notifications.NotificationsViewModel
 import com.ash.axis.ui.qr.QrScanFlow
 import com.ash.axis.ui.qr.QrScanViewModel
 import com.ash.axis.ui.settings.SettingsScreen
@@ -45,31 +40,22 @@ import com.ash.core.ui.navigation.AppScaffold
 import com.ash.core.ui.navigation.BottomNavItem
 import com.ash.core.ui.navigation.CoreNavHost
 
-private val tabRoutes = setOf("dashboard", "academics", "planner", "grades")
-
-private val fullScreenRoutes = setOf("settings", "notifications")
+internal val tabRoutes = setOf("dashboard", "academics", "planner", "settings")
 
 @Suppress("LongMethod", "CyclomaticComplexMethod")
 @Composable
 internal fun MainApp(
     preferencesStore: PreferencesStore,
     qrScanRequest: Int,
-    accounts: AccountUiState,
+    activeAdmno: String,
+    onLogout: () -> Unit,
     startRoute: String,
     onRouteVisible: (String) -> Unit,
 ) {
     val navController = rememberNavController()
-    val account = accounts.account
-    val qrViewModel: QrScanViewModel = hiltViewModel(key = "qr_${account.activeAdmno}")
+    val qrViewModel: QrScanViewModel = hiltViewModel(key = "qr_$activeAdmno")
     val qrState by qrViewModel.state.collectAsStateWithLifecycle()
     var showQrFlow by remember { mutableStateOf(false) }
-    var showAccountSwitcher by remember { mutableStateOf(false) }
-    val notificationsViewModel: NotificationsViewModel = hiltViewModel(key = "notifications_${account.activeAdmno}")
-    val notifications by notificationsViewModel.state.collectAsStateWithLifecycle()
-    LifecycleResumeEffect(notificationsViewModel) {
-        notificationsViewModel.sync()
-        onPauseOrDispose { }
-    }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     LaunchedEffect(currentRoute) { currentRoute?.let(onRouteVisible) }
@@ -93,7 +79,7 @@ internal fun MainApp(
             BottomNavItem("Home", Icons.Default.Dashboard, "dashboard"),
             BottomNavItem("Attendance", Icons.AutoMirrored.Filled.FactCheck, "academics"),
             BottomNavItem("Timetable", Icons.Default.EditCalendar, "planner"),
-            BottomNavItem("Grades", Icons.Default.School, "grades"),
+            BottomNavItem("Settings", Icons.Default.Settings, "settings"),
         )
     LaunchedEffect(qrScanRequest) {
         if (qrScanRequest > 0) {
@@ -101,50 +87,27 @@ internal fun MainApp(
         }
     }
 
-    val navigateToSettings: () -> Unit = {
-        if (currentRoute == "settings") {
-            navController.popBackStack()
-        } else {
-            navController.navigate("settings") { launchSingleTop = true }
-        }
-    }
     Box(modifier = Modifier.fillMaxSize()) {
         AppScaffold(
             items = allNavItems,
             currentRoute = currentRoute,
             onNavigate = { route ->
-                if (currentRoute in fullScreenRoutes) {
-                    navController.popBackStack()
-                }
                 navController.navigate(route) {
                     popUpTo(navController.graph.startDestinationId) { saveState = true }
                     launchSingleTop = true
                     restoreState = true
                 }
             },
-            showBottomBar = currentRoute !in fullScreenRoutes,
             fabIcon = Icons.Default.QrCodeScanner,
             onFabClick = {
                 showQrFlow = true
             },
-            topBar = {
-                AppHeader(
-                    unreadCount = notifications.unreadCount,
-                    onSettingsClick = navigateToSettings,
-                    onNotificationsClick = {
-                        navController.navigate("notifications") { launchSingleTop = true }
-                    },
-                    accountName = account.activeAccount?.name.orEmpty(),
-                    hasMultipleAccounts = account.accounts.size > 1,
-                    onAccountClick = { showAccountSwitcher = true },
-                )
-            },
+            topBar = { AppHeader() },
         ) { innerPadding ->
             Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 CoreNavHost(
                     navController = navController,
                     startDestination = startRoute,
-                    slideRoutes = setOf("settings", "grades", "notifications"),
                     routes =
                         mapOf(
                             "dashboard" to {
@@ -158,18 +121,10 @@ internal fun MainApp(
                                 )
                             },
                             "planner" to { TimetableScreen(Modifier.padding(innerPadding)) },
-                            "grades" to { GradesScreen(modifier = Modifier.padding(innerPadding)) },
                             "settings" to {
                                 SettingsScreen(
                                     modifier = Modifier.padding(innerPadding),
-                                    onLogout = accounts.onActiveLoggedOut,
-                                )
-                            },
-                            "notifications" to {
-                                NotificationsScreen(
-                                    viewModel = notificationsViewModel,
-                                    modifier = Modifier.padding(innerPadding),
-                                    onBack = { navController.popBackStack() },
+                                    onLogout = onLogout,
                                 )
                             },
                         ),
@@ -211,23 +166,6 @@ internal fun MainApp(
                         .align(Alignment.BottomCenter)
                         .navigationBarsPadding()
                         .padding(horizontal = 12.dp, vertical = 96.dp),
-            )
-        }
-
-        if (showAccountSwitcher) {
-            AccountSwitcherSheet(
-                account = account,
-                canAddAccount = accounts.canAddAccount,
-                onSwitch = { admno ->
-                    showAccountSwitcher = false
-                    if (admno != account.activeAdmno) accounts.onSwitch(admno)
-                },
-                onAddAccount = {
-                    showAccountSwitcher = false
-                    accounts.onAdd()
-                },
-                onRemove = accounts.onRemove,
-                onDismiss = { showAccountSwitcher = false },
             )
         }
     }

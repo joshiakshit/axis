@@ -2,450 +2,156 @@ package com.ash.axis.domain.usecase
 
 import com.ash.axis.domain.model.TimetableSlot
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import java.time.DayOfWeek
 import java.time.LocalDate
 
 class PlannerUseCaseTest {
-    private val attendanceUseCase = AttendanceUseCase()
-    private val plannerUseCase = PlannerUseCase(attendanceUseCase)
+    private val planner = PlannerUseCase()
+    private val monday = LocalDate.of(2026, 9, 7)
+    private val subject = SubjectAttendance("CS101", "Math", "PP", 80, 100, 80.0)
+    private val slot = TimetableSlot(subCode = "CS101", lectType = "PP")
+    private val weekly = mapOf("Mon" to listOf(slot), "Wed" to listOf(slot))
 
-    private val subjects =
-        listOf(
-            SubjectAttendance("CS101", "Math", "PP", 80, 100, 80.0),
-            SubjectAttendance("CS102", "Physics", "PP", 60, 100, 60.0),
-        )
-
-    private val timetable =
-        mapOf(
-            "Mon" to listOf(TimetableSlot(subjectId = "CS101", sub_shortname = "CS101", lectType = "PP")),
-            "Wed" to
-                listOf(
-                    TimetableSlot(subjectId = "CS101", sub_shortname = "CS101", lectType = "PP"),
-                    TimetableSlot(subjectId = "CS102", sub_shortname = "CS102", lectType = "PP"),
-                ),
-        )
-
-    private fun nextDayOfWeek(dow: DayOfWeek): LocalDate {
-        val today = LocalDate.now()
-        val delta = (dow.value - today.dayOfWeek.value + 7) % 7
-        return today.plusDays(if (delta == 0) 7L else delta.toLong())
-    }
-
-    private fun buildDateTimetable(date: LocalDate): Map<LocalDate, List<TimetableSlot>> {
-        val dayName =
-            mapOf(
-                DayOfWeek.MONDAY to "Mon",
-                DayOfWeek.TUESDAY to "Tue",
-                DayOfWeek.WEDNESDAY to "Wed",
-            )
-        val slots = timetable[dayName[date.dayOfWeek]] ?: emptyList()
-        return if (slots.isNotEmpty()) mapOf(date to slots) else emptyMap()
+    @Test
+    fun `repeats the week through the inclusive forecast end`() {
+        val row = forecast().single()
+        assertEquals(82, row.projectedPresent)
+        assertEquals(102, row.projectedTotal)
+        assertEquals(82.0 * 100 / 102, row.projectedPercent, 0.001)
     }
 
     @Test
-    fun `buildPlannerSubjects sets correct weekly count`() {
-        val result = plannerUseCase.buildPlannerSubjects(subjects, timetable, 75)
-        val math = result.find { it.code == "CS101" }!!
-        assertEquals(2, math.weeklyCount)
+    fun `absence ranges overlap without counting classes twice`() {
+        val row =
+            forecast(
+                absences =
+                    listOf(
+                        AbsenceRange(monday.plusDays(2), monday.plusWeeks(1)),
+                        AbsenceRange(monday.plusDays(2), monday.plusDays(3)),
+                    ),
+            ).single()
+        assertEquals(80, row.projectedPresent)
+        assertEquals(102, row.projectedTotal)
+        assertEquals(2, row.absencesPlanned)
     }
 
     @Test
-    fun `buildPlannerSubjects computes bunkable and need`() {
-        val result = plannerUseCase.buildPlannerSubjects(subjects, timetable, 75)
-        val math = result.find { it.code == "CS101" }!!
-        val physics = result.find { it.code == "CS102" }!!
-        assertTrue(math.bunkable > 0)
-        assertTrue(physics.need > 0)
+    fun `saved no class blocks override absences and scheduled classes`() {
+        val row =
+            forecast(
+                absences = listOf(AbsenceRange(monday.plusDays(2), monday.plusWeeks(1))),
+                noClassDates = setOf(monday.plusDays(2)),
+            ).single()
+        assertEquals(80, row.projectedPresent)
+        assertEquals(101, row.projectedTotal)
+        assertEquals(1, row.absencesPlanned)
     }
 
     @Test
-    fun `analyzeDaySafety returns no classes for empty day`() {
-        val plannerSubjects = plannerUseCase.buildPlannerSubjects(subjects, timetable, 75)
-        val safety = plannerUseCase.analyzeDaySafety("Tue", plannerSubjects, timetable)
-        assertEquals(false, safety.hasClasses)
-        assertTrue(safety.safe)
+    fun `today attended missed and already counted are distinct`() {
+        assertEquals(83, forecast(todayAttendance = TodayAttendance.ATTENDED).single().projectedPresent)
+        assertEquals(103, forecast(todayAttendance = TodayAttendance.ATTENDED).single().projectedTotal)
+        assertEquals(82, forecast(todayAttendance = TodayAttendance.MISSED).single().projectedPresent)
+        assertEquals(103, forecast(todayAttendance = TodayAttendance.MISSED).single().projectedTotal)
+        assertEquals(102, forecast(todayAttendance = TodayAttendance.ALREADY_INCLUDED).single().projectedTotal)
     }
 
     @Test
-    fun `analyzeDaySafety detects risky subjects`() {
-        val lowSubjects =
+    fun `holiday today overrides the daily answer`() {
+        assertEquals(102, forecast(todayAttendance = TodayAttendance.ATTENDED, noClassDates = setOf(monday)).single().projectedTotal)
+    }
+
+    @Test
+    fun `absence dates outside the forecast do not affect it`() {
+        val row =
+            forecast(
+                absences =
+                    listOf(
+                        AbsenceRange(monday.minusWeeks(1), monday),
+                        AbsenceRange(monday.plusWeeks(2), monday.plusWeeks(3)),
+                    ),
+            ).single()
+        assertEquals(82, row.projectedPresent)
+        assertEquals(0, row.absencesPlanned)
+    }
+
+    @Test
+    fun `sunday classes repeat and zero attendance stays finite`() {
+        val row =
+            planner.forecast(
+                listOf(subject.copy(present = 0, total = 0)),
+                mapOf("Sun" to listOf(slot)),
+                monday,
+                monday.plusDays(6),
+                TodayAttendance.ALREADY_INCLUDED,
+            ).single()
+        assertEquals(1, row.projectedTotal)
+        assertEquals(100.0, row.projectedPercent)
+        assertEquals(0.0, row.currentPercent)
+    }
+
+    @Test
+    fun `combined subject matches both lecture types and code aliases`() {
+        val slots =
             listOf(
-                SubjectAttendance("CS102", "Physics", "PP", 60, 100, 60.0),
+                TimetableSlot(subjectId = "CS101", sub_shortname = "DIFFERENT", lectType = "PP"),
+                TimetableSlot(subCode = "CS101", lectType = "PR"),
             )
-        val plannerSubjects = plannerUseCase.buildPlannerSubjects(lowSubjects, timetable, 75)
-        val safety = plannerUseCase.analyzeDaySafety("Wed", plannerSubjects, timetable)
-        assertTrue(safety.hasClasses)
+        val row =
+            planner.forecast(
+                listOf(subject.copy(lecType = "PP+PR")),
+                mapOf("Wed" to slots),
+                monday,
+                monday.plusDays(2),
+                TodayAttendance.ALREADY_INCLUDED,
+            ).single()
+        assertEquals(102, row.projectedTotal)
+        assertEquals(2, row.weeklyClasses)
     }
 
     @Test
-    fun `computeProjected returns empty for no selected dates`() {
-        val plannerSubjects = plannerUseCase.buildPlannerSubjects(subjects, timetable, 75)
-        val result = plannerUseCase.computeProjected(plannerSubjects, emptySet(), emptyMap(), 75)
-        assertTrue(result.isEmpty())
-    }
-
-    @Test
-    fun `computeProjected computes impact for future dates`() {
-        val plannerSubjects = plannerUseCase.buildPlannerSubjects(subjects, timetable, 75)
-        val nextMonday = nextDayOfWeek(DayOfWeek.MONDAY)
-        val dateTimetable = buildDateTimetable(nextMonday)
-        val result = plannerUseCase.computeProjected(plannerSubjects, setOf(nextMonday), dateTimetable, 75)
-        assertTrue(result.isNotEmpty())
-        assertTrue(result.all { it.delta <= 0 })
-        val math = result.find { it.code == "CS101" }!!
-        assertEquals(80, math.currentPresent)
-        assertEquals(100, math.currentTotal)
-        assertTrue(math.projectedTotal > math.currentTotal)
-    }
-
-    @Test
-    fun `combined PP+PR subject counts both slot types`() {
-        val combined =
-            listOf(SubjectAttendance("CS101", "Math", "PP+PR", 80, 100, 80.0))
-        val mixedTimetable =
-            mapOf(
-                "Mon" to
-                    listOf(
-                        TimetableSlot(subjectId = "CS101", sub_shortname = "CS101", lectType = "PP"),
-                        TimetableSlot(subjectId = "CS101", sub_shortname = "CS101", lectType = "PR"),
-                    ),
+    fun `name fallback does not mix lecture types`() {
+        val slots =
+            listOf(
+                TimetableSlot(subjectId = "999", subname = "Math", lectType = "PP"),
+                TimetableSlot(subjectId = "999", subname = "Math", lectType = "PR"),
             )
-        val plannerSubjects = plannerUseCase.buildPlannerSubjects(combined, mixedTimetable, 75)
-        assertEquals(2, plannerSubjects.first().weeklyCount)
+        val row =
+            planner.forecast(
+                listOf(subject),
+                mapOf("Wed" to slots),
+                monday,
+                monday.plusDays(2),
+                TodayAttendance.ALREADY_INCLUDED,
+            ).single()
+        assertEquals(101, row.projectedTotal)
     }
 
     @Test
-    fun `computeProjected populates ratio fields`() {
-        val plannerSubjects = plannerUseCase.buildPlannerSubjects(subjects, timetable, 75)
-        val nextMon = nextDayOfWeek(DayOfWeek.MONDAY)
-        val nextWed = nextDayOfWeek(DayOfWeek.WEDNESDAY)
-        val dateTimetable = buildDateTimetable(nextMon) + buildDateTimetable(nextWed)
-        val result = plannerUseCase.computeProjected(plannerSubjects, setOf(nextMon), dateTimetable, 75)
-        assertTrue(result.isNotEmpty())
-        val math = result.find { it.code == "CS101" }!!
-        assertEquals(80, math.currentPresent)
-        assertEquals(100, math.currentTotal)
-        assertEquals(102, math.projectedTotal)
-        assertEquals(81, math.projectedPresent)
+    fun `unmatched subject retains current totals and reports no weekly classes`() {
+        val row =
+            planner.forecast(
+                listOf(subject),
+                emptyMap(),
+                monday,
+                monday.plusWeeks(1),
+                TodayAttendance.ALREADY_INCLUDED,
+            ).single()
+        assertEquals(80, row.projectedPresent)
+        assertEquals(100, row.projectedTotal)
+        assertEquals(0, row.weeklyClasses)
     }
 
     @Test
-    fun `maxReachable counts exact slots to semester end`() {
-        val plannerSubjects = plannerUseCase.buildPlannerSubjects(subjects, timetable, 75)
-        val nextMon = nextDayOfWeek(DayOfWeek.MONDAY)
-        val dateTimetable = buildDateTimetable(nextMon)
-        val semesterEnd = nextMon.plusDays(13)
-        val result =
-            plannerUseCase.computeProjected(
-                plannerSubjects,
-                setOf(nextMon),
-                dateTimetable,
-                75,
-                semesterEnd,
-                timetable,
-                today = nextMon,
-                todayAttendance = TodayAttendance.MISSED,
-            )
-        assertTrue(result.isNotEmpty())
-        val math = result.find { it.code == "CS101" }!!
-        assertTrue(math.maxReachable != null)
-        assertTrue(math.maxReachable!! > math.projectedPercent)
-        val mondays = countDayOccurrences(nextMon, semesterEnd, DayOfWeek.MONDAY)
-        val wednesdays = countDayOccurrences(nextMon, semesterEnd, DayOfWeek.WEDNESDAY)
-        val expectedSemClasses = mondays * 1L + wednesdays * 1L
-        val expectedMax = (80 + expectedSemClasses - 1) * 100.0 / (100 + expectedSemClasses)
-        assertEquals(expectedMax, math.maxReachable!!, 0.01)
+    fun `below target subjects appear first`() {
+        val low = subject.copy(subCode = "LOW", present = 60, percent = 60.0)
+        val rows = planner.forecast(listOf(subject, low), weekly, monday, monday.plusWeeks(1), TodayAttendance.ALREADY_INCLUDED)
+        assertEquals("LOW", rows.first().code)
     }
 
-    @Test
-    fun `maxReachable is null without semester end`() {
-        val plannerSubjects = plannerUseCase.buildPlannerSubjects(subjects, timetable, 75)
-        val nextMon = nextDayOfWeek(DayOfWeek.MONDAY)
-        val dateTimetable = buildDateTimetable(nextMon)
-        val result = plannerUseCase.computeProjected(plannerSubjects, setOf(nextMon), dateTimetable, 75, null)
-        assertTrue(result.isNotEmpty())
-        result.forEach { assertTrue(it.maxReachable == null) }
-    }
-
-    private fun countDayOccurrences(
-        start: LocalDate,
-        end: LocalDate,
-        dow: DayOfWeek,
-    ): Int {
-        var count = 0
-        var date = start
-        while (date <= end) {
-            if (date.dayOfWeek == dow) count++
-            date = date.plusDays(1)
-        }
-        return count
-    }
-
-    @Test
-    fun `slot matching falls back to subjectId when sub_shortname differs`() {
-        val mismatchTimetable =
-            mapOf(
-                "Mon" to
-                    listOf(
-                        TimetableSlot(subjectId = "CS101", sub_shortname = "MATH101", lectType = "PP"),
-                    ),
-            )
-        val plannerSubjects = plannerUseCase.buildPlannerSubjects(subjects, mismatchTimetable, 75)
-        assertEquals(1, plannerSubjects.find { it.code == "CS101" }!!.weeklyCount)
-    }
-
-    @Test
-    fun `computeProjected resolves via subjectId fallback`() {
-        val plannerSubjects = plannerUseCase.buildPlannerSubjects(subjects, timetable, 75)
-        val nextMon = nextDayOfWeek(DayOfWeek.MONDAY)
-        val dateTimetable =
-            mapOf(
-                nextMon to
-                    listOf(
-                        TimetableSlot(subjectId = "CS101", sub_shortname = "DIFFERENT", lectType = "PP"),
-                    ),
-            )
-        val result = plannerUseCase.computeProjected(plannerSubjects, setOf(nextMon), dateTimetable, 75)
-        assertTrue(result.isNotEmpty())
-        assertEquals("CS101", result.first().code)
-    }
-
-    @Test
-    fun `analyzeDaySafety resolves via subjectId fallback`() {
-        val mismatchTimetable =
-            mapOf(
-                "Wed" to
-                    listOf(
-                        TimetableSlot(subjectId = "CS102", sub_shortname = "PHYS102", lectType = "PP"),
-                    ),
-            )
-        val lowSubjects =
-            listOf(SubjectAttendance("CS102", "Physics", "PP", 60, 100, 60.0))
-        val plannerSubjects = plannerUseCase.buildPlannerSubjects(lowSubjects, mismatchTimetable, 75)
-        val safety = plannerUseCase.analyzeDaySafety("Wed", plannerSubjects, mismatchTimetable)
-        assertTrue(safety.hasClasses)
-    }
-
-    @Test
-    fun `slot matching uses subCode field when subjectId differs`() {
-        val ttWithSubCode =
-            mapOf(
-                "Mon" to
-                    listOf(
-                        TimetableSlot(
-                            subjectId = "99999",
-                            subCode = "CS101",
-                            sub_shortname = "IRRELEVANT",
-                            lectType = "PP",
-                        ),
-                    ),
-            )
-        val plannerSubjects = plannerUseCase.buildPlannerSubjects(subjects, ttWithSubCode, 75)
-        assertEquals(1, plannerSubjects.find { it.code == "CS101" }!!.weeklyCount)
-    }
-
-    @Test
-    fun `computeProjected falls back to name matching`() {
-        val noCodeMatch =
-            listOf(SubjectAttendance("CS101", "Mathematics", "PP", 80, 100, 80.0))
-        val nameOnlyTimetable =
-            mapOf(
-                "Mon" to
-                    listOf(
-                        TimetableSlot(
-                            subjectId = "99999",
-                            subCode = "",
-                            sub_shortname = "NOMATCH",
-                            subname = "Mathematics",
-                            lectType = "PP",
-                        ),
-                    ),
-            )
-        val plannerSubjects = plannerUseCase.buildPlannerSubjects(noCodeMatch, nameOnlyTimetable, 75)
-        assertEquals(1, plannerSubjects.first().weeklyCount)
-        val nextMon = nextDayOfWeek(DayOfWeek.MONDAY)
-        val dateTimetable =
-            mapOf(
-                nextMon to
-                    listOf(
-                        TimetableSlot(
-                            subjectId = "99999",
-                            subCode = "",
-                            sub_shortname = "NOMATCH",
-                            subname = "Mathematics",
-                            lectType = "PP",
-                        ),
-                    ),
-            )
-        val result = plannerUseCase.computeProjected(plannerSubjects, setOf(nextMon), dateTimetable, 75)
-        assertTrue(result.isNotEmpty())
-        assertEquals("CS101", result.first().code)
-    }
-
-    @Test
-    fun `computeProjected handles combined PP+PR absences`() {
-        val combined =
-            listOf(SubjectAttendance("CS101", "Math", "PP+PR", 80, 100, 80.0))
-        val nextMonday = nextDayOfWeek(DayOfWeek.MONDAY)
-        val dateTimetable =
-            mapOf(
-                nextMonday to
-                    listOf(
-                        TimetableSlot(subjectId = "CS101", sub_shortname = "CS101", lectType = "PP"),
-                        TimetableSlot(subjectId = "CS101", sub_shortname = "CS101", lectType = "PR"),
-                    ),
-            )
-        val plannerSubjects = plannerUseCase.buildPlannerSubjects(combined, dateTimetable.values.first().let { mapOf("Mon" to it) }, 75)
-        val result = plannerUseCase.computeProjected(plannerSubjects, setOf(nextMonday), dateTimetable, 75)
-        assertTrue(result.isNotEmpty())
-        assertEquals(2, result.first().absencesPlanned)
-    }
-
-    @Test
-    fun `no class dates do not count as planned absences`() {
-        val plannerSubjects = plannerUseCase.buildPlannerSubjects(subjects, timetable, 75)
-        val nextMonday = nextDayOfWeek(DayOfWeek.MONDAY)
-        val dateTimetable = buildDateTimetable(nextMonday)
-
-        val result =
-            plannerUseCase.computeProjected(
-                plannerSubjects,
-                setOf(nextMonday),
-                dateTimetable,
-                75,
-                noClassDates = setOf(nextMonday),
-            )
-
-        assertTrue(result.isEmpty())
-    }
-
-    @Test
-    fun `no class dates are excluded from maximum reachable attendance`() {
-        val plannerSubjects = plannerUseCase.buildPlannerSubjects(subjects, timetable, 75)
-        val nextMonday = nextDayOfWeek(DayOfWeek.MONDAY)
-        val dateTimetable = buildDateTimetable(nextMonday)
-
-        val result =
-            plannerUseCase.computeProjected(
-                plannerSubjects,
-                setOf(nextMonday),
-                dateTimetable,
-                75,
-                semesterEnd = nextMonday.plusDays(7),
-                weeklyTimetable = timetable,
-                today = nextMonday,
-                todayAttendance = TodayAttendance.MISSED,
-                noClassDates = setOf(nextMonday.plusDays(7)),
-            )
-
-        val math = result.find { it.code == "CS101" }!!
-        assertEquals(81.0 * 100.0 / 102.0, math.maxReachable!!, 0.01)
-    }
-
-    @Test
-    fun `today attended is included before the semester maximum`() {
-        val monday = LocalDate.of(2026, 9, 7)
-        val plannerSubjects = plannerUseCase.buildPlannerSubjects(subjects, timetable, 75)
-
-        val result =
-            plannerUseCase.computeProjected(
-                subjects = plannerSubjects,
-                selectedDates = emptySet(),
-                dateTimetable = mapOf(monday to timetable.getValue("Mon")),
-                semesterEnd = monday.plusDays(7),
-                weeklyTimetable = timetable,
-                today = monday,
-                includeNoAbsence = true,
-                todayAttendance = TodayAttendance.ATTENDED,
-            )
-
-        val math = result.first { it.code == "CS101" }
-        assertEquals(83, math.maxPresent)
-        assertEquals(103, math.maxTotal)
-        assertEquals(83.0 * 100.0 / 103.0, math.maxReachable!!, 0.01)
-    }
-
-    @Test
-    fun `today missed lowers the semester maximum`() {
-        val monday = LocalDate.of(2026, 9, 7)
-        val plannerSubjects = plannerUseCase.buildPlannerSubjects(subjects, timetable, 75)
-
-        val result =
-            plannerUseCase.computeProjected(
-                subjects = plannerSubjects,
-                selectedDates = emptySet(),
-                dateTimetable = mapOf(monday to timetable.getValue("Mon")),
-                semesterEnd = monday.plusDays(7),
-                weeklyTimetable = timetable,
-                today = monday,
-                includeNoAbsence = true,
-                todayAttendance = TodayAttendance.MISSED,
-            )
-
-        val math = result.first { it.code == "CS101" }
-        assertEquals(82, math.maxPresent)
-        assertEquals(103, math.maxTotal)
-        assertEquals(82.0 * 100.0 / 103.0, math.maxReachable!!, 0.01)
-    }
-
-    @Test
-    fun `projection stops at the held date`() {
-        val monday = LocalDate.of(2026, 9, 7)
-        val wednesday = monday.plusDays(2)
-        val nextMonday = monday.plusDays(7)
-        val plannerSubjects = plannerUseCase.buildPlannerSubjects(subjects, timetable, 75)
-        val dateTimetable =
-            mapOf(
-                monday to timetable.getValue("Mon"),
-                wednesday to timetable.getValue("Wed"),
-                nextMonday to timetable.getValue("Mon"),
-            )
-
-        val result =
-            plannerUseCase.computeProjected(
-                subjects = plannerSubjects,
-                selectedDates = setOf(wednesday),
-                dateTimetable = dateTimetable,
-                today = monday,
-                includeNoAbsence = true,
-                projectionEnd = wednesday,
-                todayAttendance = TodayAttendance.ATTENDED,
-            )
-
-        val math = result.first { it.code == "CS101" }
-        assertEquals(81, math.projectedPresent)
-        assertEquals(102, math.projectedTotal)
-    }
-
-    @Test
-    fun `semester maximum assumes all future classes are attended`() {
-        val monday = LocalDate.of(2026, 9, 7)
-        val nextMonday = monday.plusDays(7)
-        val plannerSubjects = plannerUseCase.buildPlannerSubjects(subjects, timetable, 75)
-
-        val result =
-            plannerUseCase.computeProjected(
-                subjects = plannerSubjects,
-                selectedDates = setOf(nextMonday),
-                dateTimetable =
-                    mapOf(
-                        monday to timetable.getValue("Mon"),
-                        nextMonday to timetable.getValue("Mon"),
-                    ),
-                semesterEnd = nextMonday,
-                weeklyTimetable = timetable,
-                today = monday,
-                includeNoAbsence = true,
-                projectionEnd = nextMonday,
-                todayAttendance = TodayAttendance.ATTENDED,
-            )
-
-        val math = result.first { it.code == "CS101" }
-        assertEquals(81, math.projectedPresent)
-        assertEquals(102, math.projectedTotal)
-        assertEquals(83, math.maxPresent)
-        assertEquals(103, math.maxTotal)
-    }
+    private fun forecast(
+        absences: List<AbsenceRange> = emptyList(),
+        noClassDates: Set<LocalDate> = emptySet(),
+        todayAttendance: TodayAttendance = TodayAttendance.ALREADY_INCLUDED,
+    ) = planner.forecast(listOf(subject), weekly, monday, monday.plusWeeks(1), todayAttendance, absences, noClassDates)
 }

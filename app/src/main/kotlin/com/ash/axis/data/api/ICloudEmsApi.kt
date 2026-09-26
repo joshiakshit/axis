@@ -21,24 +21,4 @@ interface ICloudEmsApi {
     suspend fun postTimetableV1(
         @Body body: RequestBody,
     ): Response<ResponseBody>
-
-    @POST("corecampus/student/grades/new/save/myreportcardSave.php")
-    suspend fun postGrades(
-        @Body body: RequestBody,
-    ): Response<ResponseBody>
-
-    @POST("corecampus/student/grades/new/save/myreportcardController.php")
-    suspend fun postReportCardController(
-        @Body body: RequestBody,
-    ): Response<ResponseBody>
-
-    @POST("corecampus/admin/reports/new/save/cutlist_marksheetSave.php")
-    suspend fun postPrintReportCard(
-        @Body body: RequestBody,
-    ): Response<ResponseBody>
-
-    @POST("corecampus/student/grades/new/save/admitCardController.php")
-    suspend fun postAdmitCard(
-        @Body body: RequestBody,
-    ): Response<ResponseBody>
 }

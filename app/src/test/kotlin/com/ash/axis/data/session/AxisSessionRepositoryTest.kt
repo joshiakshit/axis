@@ -1,7 +1,6 @@
 package com.ash.axis.data.session
 
 import com.ash.axis.data.api.AxisBackendApi
-import com.ash.axis.data.device.DeviceIdProvider
 import com.ash.core.security.TokenManager
 import com.ash.core.storage.PreferencesStore
 import io.mockk.Runs
@@ -23,10 +22,9 @@ private const val KEY = "axis_session"
 class AxisSessionRepositoryTest {
     private val json = Json { ignoreUnknownKeys = true }
     private val tokenManager = mockk<TokenManager>()
-    private val deviceIdProvider = mockk<DeviceIdProvider> { every { get() } returns "compatible-device-id" }
     private val prefs = mockk<PreferencesStore>()
 
-    private fun repo(api: AxisBackendApi?) = AxisSessionRepository(api, tokenManager, deviceIdProvider, prefs, json)
+    private fun repo(api: AxisBackendApi?) = AxisSessionRepository(api, tokenManager, prefs, json)
 
     @Test
     fun `disabled build reports not-enabled and never calls the network`() =
@@ -64,7 +62,9 @@ class AxisSessionRepositoryTest {
 
             assertEquals("approved", r.state.value.status)
             coVerify { prefs.putUserString(KEY, any()) }
-            coVerify { api.session(match { it.deviceId == "compatible-device-id" }) }
+            coVerify {
+                api.session(match { !json.encodeToString(it).contains("deviceId") && it.token == "icloud-token" })
+            }
         }
 
     @Test

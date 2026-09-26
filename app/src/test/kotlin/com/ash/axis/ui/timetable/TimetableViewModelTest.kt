@@ -3,8 +3,6 @@ package com.ash.axis.ui.timetable
 import androidx.lifecycle.viewModelScope
 import com.ash.axis.data.academic.AcademicDataCoordinator
 import com.ash.axis.data.academic.AcademicSnapshot
-import com.ash.axis.data.repository.AuthRepository
-import com.ash.axis.data.repository.CalendarRepository
 import com.ash.axis.data.repository.TimetableData
 import com.ash.axis.data.repository.TimetableKey
 import com.ash.axis.data.repository.TimetableRepository
@@ -43,7 +41,6 @@ class TimetableViewModelTest {
     private val weeks = mutableMapOf<TimetableKey, MutableStateFlow<AcademicSnapshot<TimetableData>>>()
     private val repository = mockk<TimetableRepository>()
     private val coordinator = mockk<AcademicDataCoordinator>()
-    private val auth = mockk<AuthRepository>()
     private val preferences = mockk<PreferencesStore>(relaxed = true)
     private val network = mockk<NetworkMonitor>()
 
@@ -53,7 +50,6 @@ class TimetableViewModelTest {
         every { coordinator.activeContext } returns activeContext
         every { coordinator.timetableDemandError } returns demandError
         every { network.isOnline } returns MutableStateFlow(true)
-        every { auth.getUserInfo() } returns null
         coEvery { coordinator.timetableVisible(any()) } returns Unit
         coEvery { repository.observeWeek(any()) } answers {
             weeks.getOrPut(firstArg()) { MutableStateFlow(AcademicSnapshot()) }
@@ -157,8 +153,6 @@ class TimetableViewModelTest {
         TimetableViewModel(
             repository,
             coordinator,
-            auth,
-            mockk<CalendarRepository>(),
             mockk<TimetableUseCase>(relaxed = true),
             preferences,
             network,

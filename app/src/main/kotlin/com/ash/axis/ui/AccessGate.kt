@@ -22,14 +22,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ash.axis.data.session.AxisSession
-import com.ash.core.security.AccountEntry
 
 // Render immediately. Only pending or banned accounts block access.
 @Composable
 internal fun AccessGate(
     activeAdmno: String?,
-    accounts: List<AccountEntry>,
-    onSwitch: (String) -> Unit,
+    onLogout: () -> Unit,
     content: @Composable () -> Unit,
 ) {
     val viewModel: AccessViewModel = hiltViewModel()
@@ -37,8 +35,6 @@ internal fun AccessGate(
 
     LaunchedEffect(activeAdmno) { viewModel.refresh() }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
-
-    val otherAccounts = accounts.filter { it.admno != activeAdmno }
 
     when {
         !access.enabled -> content()
@@ -49,8 +45,7 @@ internal fun AccessGate(
                     "This account is pending approval from the Axis admin. " +
                         "You'll get in as soon as you're approved.",
                 onRetry = viewModel::refresh,
-                otherAccounts = otherAccounts,
-                onSwitch = onSwitch,
+                onLogout = onLogout,
             )
 
         access.status == AxisSession.STATUS_BANNED ->
@@ -58,8 +53,7 @@ internal fun AccessGate(
                 title = "Access revoked",
                 message = "This account's access to Axis has been removed by the admin.",
                 onRetry = null,
-                otherAccounts = otherAccounts,
-                onSwitch = onSwitch,
+                onLogout = onLogout,
             )
 
         else -> content()
@@ -71,8 +65,7 @@ private fun BlockedAccountScreen(
     title: String,
     message: String,
     onRetry: (() -> Unit)?,
-    otherAccounts: List<AccountEntry>,
-    onSwitch: (String) -> Unit,
+    onLogout: () -> Unit,
 ) {
     Box(
         modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
@@ -97,11 +90,7 @@ private fun BlockedAccountScreen(
             onRetry?.let { retry ->
                 TextButton(onClick = retry) { Text("Check again") }
             }
-            otherAccounts.forEach { account ->
-                TextButton(onClick = { onSwitch(account.admno) }) {
-                    Text("Return as ${account.name.ifBlank { account.admno }}")
-                }
-            }
+            TextButton(onClick = onLogout) { Text("Log out") }
         }
     }
 }

@@ -30,7 +30,7 @@ class SemesterSelectionTest {
             coordinator.activate(second, SemesterOption("Y2", "C2", ""), monday)
             assertEquals(second, coordinator.selectedSemester.value.context)
             assertEquals(SemesterOption("Y2", "C2", ""), coordinator.selectedSemester.value.option)
-            coVerify(exactly = 0) { attendance.getPreferredSemester(any(), any(), any(), any(), any()) }
+            coVerify(exactly = 0) { attendance.getLatestSemester(any(), any(), any()) }
             coordinator.deactivate()
         }
 }

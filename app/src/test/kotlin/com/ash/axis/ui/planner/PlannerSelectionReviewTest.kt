@@ -6,14 +6,11 @@ import com.ash.axis.data.academic.AcademicSemesterSelection
 import com.ash.axis.data.academic.AcademicSnapshot
 import com.ash.axis.data.repository.AttendanceKey
 import com.ash.axis.data.repository.AttendanceRepository
-import com.ash.axis.data.repository.AuthRepository
-import com.ash.axis.data.repository.CalendarRepository
 import com.ash.axis.data.repository.StudentMarkerRepository
 import com.ash.axis.data.repository.TimetableRepository
 import com.ash.axis.domain.model.AttendanceResponse
 import com.ash.axis.domain.model.SemesterOption
 import com.ash.axis.domain.model.StudentRequestContext
-import com.ash.axis.domain.model.UserInfo
 import com.ash.axis.domain.usecase.AttendanceUseCase
 import com.ash.axis.domain.usecase.PlannerUseCase
 import com.ash.core.network.NetworkMonitor
@@ -45,8 +42,7 @@ class PlannerSelectionReviewTest {
             val coordinator = mockk<AcademicDataCoordinator>()
             val attendance = mockk<AttendanceRepository>()
             val timetable = mockk<TimetableRepository>(relaxed = true)
-            val auth = mockk<AuthRepository>()
-            val calendar = mockk<CalendarRepository>()
+
             val markers = mockk<StudentMarkerRepository>()
             val preferences = mockk<PreferencesStore>()
             val network = mockk<NetworkMonitor>()
@@ -58,8 +54,6 @@ class PlannerSelectionReviewTest {
             every { coordinator.attendanceDemandError } returns MutableStateFlow(null)
             every { coordinator.timetableDemandError } returns MutableStateFlow(null)
             coEvery { coordinator.plannerVisible(any()) } returns Unit
-            coEvery { coordinator.plannerCoverage(any()) } returns Unit
-            every { auth.getUserInfo() } returns UserInfo("A", 1, "Alex", "", "", "Client")
             every { preferences.getUserString(any(), any()) } answers {
                 flowOf(
                     when (firstArg<String>()) {
@@ -72,17 +66,23 @@ class PlannerSelectionReviewTest {
             every { preferences.getUserBoolean(any(), any()) } returns flowOf(false)
             every { preferences.getUserInt(any(), any()) } returns flowOf(75)
             every { network.isOnline } returns flowOf(true)
-            coEvery { calendar.getCalendar(any(), any(), any(), any()) } throws IllegalStateException("calendar offline")
+
             coEvery { markers.observe(any()) } returns flowOf(emptyList())
-            coEvery { attendance.getPreferredSemester(any(), any(), any(), any(), any()) } coAnswers { pending.await() }
+            coEvery { attendance.getLatestSemester(any(), any(), any()) } coAnswers { pending.await() }
             coEvery { attendance.observeSummary(any()) } returns
                 MutableStateFlow(AcademicSnapshot(data = AttendanceResponse()))
             coEvery { timetable.observeWeek(any()) } returns MutableStateFlow(AcademicSnapshot())
             val useCase = AttendanceUseCase()
             val viewModel =
                 PlannerViewModel(
-                    attendance, timetable, coordinator, auth, markers,
-                    calendar, useCase, PlannerUseCase(useCase), preferences, network,
+                    attendance,
+                    timetable,
+                    coordinator,
+                    markers,
+                    useCase,
+                    PlannerUseCase(),
+                    preferences,
+                    network,
                 ).also { it.calculationDispatcher = Dispatchers.Main }
             try {
                 runCurrent()

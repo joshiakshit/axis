@@ -7,7 +7,7 @@
 **A fast, modern Android client for Galgotias University students.**
 
 Axis is a rebranded, ground-up rebuild of the student experience on top of the university's iCloudEMS
-system — attendance, timetable, grades, and QR attendance in one clean, offline-friendly app.
+system — attendance, timetable, and QR attendance in one clean, offline-friendly app.
 
 ![Platform](https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white)
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.1-7F52FF?logo=kotlin&logoColor=white)
@@ -23,17 +23,13 @@ system — attendance, timetable, grades, and QR attendance in one clean, offlin
 
 ## Screenshots
 
-| Dashboard | Attendance | Timetable | Grades |
-| :---: | :---: | :---: | :---: |
-| ![Dashboard](docs/screenshots/dashboard.png) | ![Attendance](docs/screenshots/attendance.jpg) | ![Timetable](docs/screenshots/timetable.png) | ![Grades](docs/screenshots/grades.jpg) |
-
-| Notifications | Notification details | Planner |
+| Dashboard | Attendance | Timetable |
 | :---: | :---: | :---: |
-| ![Notifications](docs/screenshots/notifications.png) | ![Notification details](docs/screenshots/notification-details.png) | ![Planner](docs/screenshots/planner.png) |
+| ![Dashboard](docs/screenshots/dashboard.png) | ![Attendance](docs/screenshots/attendance.jpg) | ![Timetable](docs/screenshots/timetable.png) |
 
-| Settings | Admin tools |
-| :---: | :---: |
-| ![Settings](docs/screenshots/settings.jpg) | ![Admin tools](docs/screenshots/admin.jpg) |
+| Planner | Settings | Admin tools |
+| :---: | :---: | :---: |
+| ![Planner](docs/screenshots/planner.png) | ![Settings](docs/screenshots/settings.jpg) | ![Admin tools](docs/screenshots/admin.jpg) |
 
 ---
 
@@ -42,12 +38,10 @@ system — attendance, timetable, grades, and QR attendance in one clean, offlin
 - **Dashboard** — today's classes, attendance at a glance, and what's next.
 - **Attendance** — per-subject breakdown with **forecasting** ("how many can I skip / must I attend to hit my
   target?") and combined-attendance handling.
-- **Timetable & planner** — day-wise schedule with a clean weekly view.
-- **University calendar:** events and holidays in Timetable and Planner, with cached data and refresh timestamps.
-- **Notifications:** unread count, local read status, full messages, links, and visible refresh errors.
-- **Grades** — marks and performance insights per course.
+- **Timetable & planner** — day-wise schedule and a weekly attendance forecast with planned absence ranges.
+- **Personal academic calendar:** saved exam and holiday blocks exclude no-class dates from planner projections.
 - **QR attendance** — scan the class QR, capture a selfie, and mark attendance (ML Kit + ZXing decode pipeline).
-- **Export** — share or save attendance/timetable as **PDF / CSV / ICS** straight to Downloads.
+- **Export** — share or save attendance/timetable as **PNG images** straight to Downloads.
 - **Themes** — light/dark plus accent-colour profiles.
 - **One-tap auto-update** — the app can download and install a new build in place, no store required.
 - **Governed access** — the owner approves, kicks, or bans users, and can force-update or kill-switch every
@@ -62,7 +56,7 @@ Axis is two pieces: the Android app and a small Cloudflare Worker backend.
 ```
 ┌────────────────────────┐     iCloudEMS token      ┌──────────────────────┐
 │   Axis Android app     │ ───── (identity) ──────▶ │   iCloudEMS (GU)     │
-│  Kotlin · Compose      │                          │  attendance / grades │
+│  Kotlin · Compose      │                          │  attendance / timetable │
 │  Hilt · Room · Retrofit│                          └──────────────────────┘
 └───────────┬────────────┘
             │  remote config · sessions · usage · admin

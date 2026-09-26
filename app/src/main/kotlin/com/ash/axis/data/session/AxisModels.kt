@@ -10,7 +10,6 @@ data class SessionRequest(
     val appVersionCode: Int = 0,
     val deviceModel: String = "",
     val androidSdk: Int = 0,
-    val deviceId: String = "",
 )
 
 @Serializable

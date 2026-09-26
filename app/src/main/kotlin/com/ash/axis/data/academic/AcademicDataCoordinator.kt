@@ -73,9 +73,8 @@ class AcademicDataCoordinator
         private var daywiseDemand = 0L
         private val mutableTransition = MutableStateFlow(0L)
         val transition: StateFlow<Long> = mutableTransition
-        private val requiredQueue = LinkedHashSet<TimetableKey>()
         private val prefetchQueue = LinkedHashSet<TimetableKey>()
-        private var coverageWorker: Job? = null
+        private var prefetchWorker: Job? = null
         private var pendingQrOrigin: StudentRequestContext? = null
 
         suspend fun activate(
@@ -90,9 +89,8 @@ class AcademicDataCoordinator
                 timetable.deactivateAcademicData()
                 generation++
                 mutableTransition.value = generation
-                coverageWorker?.cancel()
-                coverageWorker = null
-                requiredQueue.clear()
+                prefetchWorker?.cancel()
+                prefetchWorker = null
                 prefetchQueue.clear()
                 active = context
                 mutableActiveContext.value = context
@@ -130,9 +128,8 @@ class AcademicDataCoordinator
             mutex.withLock {
                 generation++
                 mutableTransition.value = generation
-                coverageWorker?.cancel()
-                coverageWorker = null
-                requiredQueue.clear()
+                prefetchWorker?.cancel()
+                prefetchWorker = null
                 prefetchQueue.clear()
                 active = null
                 mutableActiveContext.value = null
@@ -153,25 +150,7 @@ class AcademicDataCoordinator
             }
         }
 
-        suspend fun selectSemester(option: SemesterOption) {
-            mutex.withLock {
-                val context = active ?: return
-                semester = option
-                selectionVersion++
-                mutableSelectedSemester.value = AcademicSemesterSelection(context, option)
-                mutableAttendanceDemandError.value = null
-                mutableDaywiseDemandError.value = null
-                summaryDemand++
-                daywiseDemand++
-                applyPendingQr(context, option)
-            }
-            safeSummary()
-        }
-
-        suspend fun discoverSemester(
-            savedYear: String = "",
-            savedClass: String = "",
-        ) {
+        suspend fun discoverSemester() {
             val (context, observed) =
                 mutex.withLock {
                     val context = active ?: return
@@ -180,7 +159,7 @@ class AcademicDataCoordinator
                     context to (generation to selectionVersion)
                 }
             try {
-                val option = attendance.getPreferredSemester(context.admno, context.brId, savedYear, savedClass)
+                val option = attendance.getLatestSemester(context.admno, context.brId)
                 mutex.withLock {
                     val current = active ?: return
                     if (!sameAccount(current, context) || generation != observed.first || selectionVersion != observed.second) return
@@ -217,16 +196,6 @@ class AcademicDataCoordinator
             prefetchAdjacent(weekStart)
         }
 
-        suspend fun plannerCoverage(weeks: Collection<LocalDate>) {
-            mutex.withLock {
-                val context = active?.takeIf { it.academicYear.isNotBlank() } ?: return
-                weeks.forEach { week ->
-                    requiredQueue += TimetableKey(context, week.toString(), week.plusDays(6).toString())
-                }
-                startCoverageWorker()
-            }
-        }
-
         suspend fun prefetchAdjacent(weekStart: LocalDate) {
             mutex.withLock {
                 val context = active?.takeIf { it.academicYear.isNotBlank() } ?: return
@@ -234,7 +203,7 @@ class AcademicDataCoordinator
                 listOf(weekStart.minusWeeks(1), weekStart.plusWeeks(1)).forEach { week ->
                     prefetchQueue += TimetableKey(context, week.toString(), week.plusDays(6).toString())
                 }
-                startCoverageWorker()
+                startPrefetchWorker()
             }
         }
 
@@ -294,9 +263,8 @@ class AcademicDataCoordinator
                 if (current != refreshed) {
                     generation++
                     mutableTransition.value = generation
-                    coverageWorker?.cancel()
-                    coverageWorker = null
-                    requiredQueue.clear()
+                    prefetchWorker?.cancel()
+                    prefetchWorker = null
                     prefetchQueue.clear()
                 }
                 active = refreshed
@@ -349,9 +317,8 @@ class AcademicDataCoordinator
                 mutableAttendanceDemandError.value = null
                 mutableTimetableDemandError.value = null
                 mutableDaywiseDemandError.value = null
-                coverageWorker?.cancel()
-                coverageWorker = null
-                requiredQueue.clear()
+                prefetchWorker?.cancel()
+                prefetchWorker = null
                 prefetchQueue.clear()
                 attendance.clearCache()
                 timetable.clearCache()
@@ -359,35 +326,26 @@ class AcademicDataCoordinator
         }
 
         @Suppress("CyclomaticComplexMethod")
-        private fun startCoverageWorker() {
-            if (coverageWorker?.isActive == true) return
+        private fun startPrefetchWorker() {
+            if (prefetchWorker?.isActive == true) return
             val owner = generation
-            coverageWorker =
+            prefetchWorker =
                 scope.launch {
                     while (true) {
                         val next =
                             mutex.withLock {
                                 if (generation != owner) return@launch
-                                val required = requiredQueue.firstOrNull()
-                                if (required != null) {
-                                    requiredQueue.remove(required)
-                                    required to true
-                                } else {
-                                    val prefetch = prefetchQueue.firstOrNull() ?: return@launch
-                                    prefetchQueue.remove(prefetch)
-                                    prefetch to false
-                                }
+                                val prefetch = prefetchQueue.firstOrNull() ?: return@launch
+                                prefetchQueue.remove(prefetch)
+                                prefetch
                             }
-                        val (key, required) = next
+                        val key = next
                         val visible = mutex.withLock { visibleWeek == (key.startDate to key.endDate) }
-                        if (!required && visible) continue
+                        if (visible) continue
                         try {
-                            if (!required) {
-                                val visibleKey = mutex.withLock { visibleWeek?.let { TimetableKey(key.context, it.first, it.second) } }
-                                visibleKey?.let { timetable.observeWeek(it).first { snapshot -> !snapshot.refreshing } }
-                            }
-                            val snapshot =
-                                if (required) timetable.requestRequiredWeek(key) else timetable.requestPrefetchWeek(key)
+                            val visibleKey = mutex.withLock { visibleWeek?.let { TimetableKey(key.context, it.first, it.second) } }
+                            visibleKey?.let { timetable.observeWeek(it).first { snapshot -> !snapshot.refreshing } }
+                            val snapshot = timetable.requestPrefetchWeek(key)
                             snapshot.first { !it.refreshing }
                         } catch (error: CancellationException) {
                             throw error

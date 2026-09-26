@@ -101,7 +101,7 @@ fun AppTheme(
                 if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
             }
             else -> {
-                val accent = ColorProfiles.parseAccent(themeState.accentHex)
+                val accent = ColorProfiles.parseAccent(ColorProfiles.presetHex(themeState.accentHex))
                 val profile =
                     if (accent != null) ColorProfiles.accented(accent) else ColorProfiles.byName(themeState.profileName)
                 if (isDark) profile.toDarkScheme() else profile.toLightScheme()

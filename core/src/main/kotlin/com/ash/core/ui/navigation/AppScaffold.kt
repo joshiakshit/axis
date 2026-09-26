@@ -67,7 +67,6 @@ fun AppScaffold(
     onNavigate: (String) -> Unit,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     showBottomBar: Boolean = true,
-    compactNavBar: Boolean = false,
     fabIcon: ImageVector? = null,
     onFabClick: () -> Unit = {},
     topBar: @Composable () -> Unit = {},
@@ -87,7 +86,6 @@ fun AppScaffold(
                     items = items,
                     currentRoute = currentRoute,
                     onNavigate = onNavigate,
-                    compact = compactNavBar,
                     fabIcon = fabIcon,
                     onFabClick = onFabClick,
                     modifier = Modifier.align(Alignment.BottomCenter),
@@ -103,7 +101,6 @@ private fun FloatingBottomBar(
     items: List<BottomNavItem>,
     currentRoute: String?,
     onNavigate: (String) -> Unit,
-    compact: Boolean,
     fabIcon: ImageVector?,
     onFabClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -200,49 +197,33 @@ private fun FloatingBottomBar(
             Row(
                 modifier =
                     Modifier
-                        .height(if (compact) 54.dp else 58.dp)
-                        .padding(horizontal = if (compact) 8.dp else 6.dp),
+                        .height(58.dp)
+                        .padding(horizontal = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = if (compact) Arrangement.spacedBy(6.dp) else Arrangement.Center,
+                horizontalArrangement = Arrangement.Center,
             ) {
                 items.take(midIndex).forEach { item ->
-                    if (compact) {
-                        CompactNavBarItem(
-                            item = item,
-                            selected = item.route == currentRoute,
-                            onClick = { onNavigate(item.route) },
-                        )
-                    } else {
-                        NavBarItem(
-                            item = item,
-                            selected = item.route == currentRoute,
-                            onClick = { onNavigate(item.route) },
-                            modifier = Modifier.width(68.dp),
-                        )
-                    }
+                    NavBarItem(
+                        item = item,
+                        selected = item.route == currentRoute,
+                        onClick = { onNavigate(item.route) },
+                        modifier = Modifier.width(68.dp),
+                    )
                 }
 
                 if (hasFab) {
-                    Spacer(Modifier.width(if (compact) 46.dp else 52.dp))
+                    Spacer(Modifier.width(52.dp))
                 } else {
-                    Spacer(Modifier.width(if (compact) 6.dp else 8.dp))
+                    Spacer(Modifier.width(8.dp))
                 }
 
                 items.drop(midIndex).forEach { item ->
-                    if (compact) {
-                        CompactNavBarItem(
-                            item = item,
-                            selected = item.route == currentRoute,
-                            onClick = { onNavigate(item.route) },
-                        )
-                    } else {
-                        NavBarItem(
-                            item = item,
-                            selected = item.route == currentRoute,
-                            onClick = { onNavigate(item.route) },
-                            modifier = Modifier.width(68.dp),
-                        )
-                    }
+                    NavBarItem(
+                        item = item,
+                        selected = item.route == currentRoute,
+                        onClick = { onNavigate(item.route) },
+                        modifier = Modifier.width(68.dp),
+                    )
                 }
             }
         }
@@ -340,53 +321,6 @@ private fun NavBarItem(
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                     },
-            )
-        }
-    }
-}
-
-@Composable
-private fun CompactNavBarItem(
-    item: BottomNavItem,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val scale by animateFloatAsState(
-        targetValue = if (selected) 1.08f else 1f,
-        animationSpec =
-            spring(
-                dampingRatio = Spring.DampingRatioMediumBouncy,
-                stiffness = Spring.StiffnessMediumLow,
-            ),
-        label = "nav_scale",
-    )
-
-    val iconTint =
-        if (selected) {
-            MaterialTheme.colorScheme.primary
-        } else {
-            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-        }
-
-    Surface(
-        onClick = onClick,
-        modifier = modifier.size(42.dp),
-        color = Color.Transparent,
-        shape = CircleShape,
-    ) {
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-            Icon(
-                imageVector = item.icon,
-                contentDescription = item.label,
-                modifier =
-                    Modifier
-                        .size(20.dp)
-                        .graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
-                        },
-                tint = iconTint,
             )
         }
     }

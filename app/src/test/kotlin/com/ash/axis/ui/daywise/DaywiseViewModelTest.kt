@@ -50,7 +50,7 @@ class DaywiseViewModelTest {
                     )
                 every { coordinator.daywiseDemandError } returns MutableStateFlow(null)
                 every { network.isOnline } returns flowOf(true)
-                coEvery { attendance.getPreferredSemester(any(), any(), any(), any(), any()) } coAnswers {
+                coEvery { attendance.getLatestSemester(any(), any(), any()) } coAnswers {
                     CompletableDeferred<com.ash.axis.domain.model.SemesterOption>().await()
                 }
                 coEvery { attendance.observeDaywise(any()) } coAnswers {

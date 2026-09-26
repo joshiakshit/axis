@@ -30,12 +30,6 @@ import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
 
-@Suppress("TopLevelPropertyNaming")
-const val SELECTED_SEMESTER_YEAR_KEY = "selected_semester_year_id"
-
-@Suppress("TopLevelPropertyNaming")
-const val SELECTED_SEMESTER_CLASS_KEY = "selected_semester_class_id"
-
 @Singleton
 @Suppress("TooGenericExceptionCaught")
 class AttendanceRepository
@@ -124,16 +118,13 @@ class AttendanceRepository
             }
         }
 
-        suspend fun getPreferredSemester(
+        suspend fun getLatestSemester(
             admno: String,
             brId: Int,
-            selectedYearId: String,
-            selectedClassId: String,
             forceRefresh: Boolean = false,
         ): SemesterOption {
             val options = getSemesterOptions(admno, brId, forceRefresh)
-            return options.firstOrNull { it.yearId == selectedYearId && it.classId == selectedClassId }
-                ?: options.firstOrNull()
+            return options.firstOrNull()
                 ?: error("No semester data found. Your classes may not be enrolled yet.")
         }
 

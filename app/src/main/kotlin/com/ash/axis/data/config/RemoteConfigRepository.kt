@@ -41,18 +41,19 @@ class RemoteConfigRepository
 
         // Keep the last good config on failure so startup can continue.
         @Suppress("TooGenericExceptionCaught")
-        suspend fun refresh() {
-            val client = api ?: return
+        suspend fun refresh(): Boolean {
+            val client = api ?: return false
             val fetched =
                 try {
                     client.getConfig()
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
-                    return
+                    return false
                 }
             preferencesStore.putString(KEY, json.encodeToString(fetched))
             publish(fetched)
+            return true
         }
 
         private fun publish(config: RemoteConfig) {

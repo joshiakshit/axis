@@ -8,12 +8,8 @@ import androidx.lifecycle.viewModelScope
 import com.ash.axis.data.academic.AcademicDataCoordinator
 import com.ash.axis.data.export.DataExporter
 import com.ash.axis.data.export.ExportFile
-import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
-import com.ash.axis.data.repository.SELECTED_SEMESTER_CLASS_KEY
-import com.ash.axis.data.repository.SELECTED_SEMESTER_YEAR_KEY
 import com.ash.axis.data.session.UsageReporter
-import com.ash.axis.domain.model.SemesterOption
 import com.ash.axis.ui.ErrorText
 import com.ash.core.storage.PreferencesStore
 import com.ash.core.ui.theme.ColorProfiles
@@ -35,14 +31,9 @@ data class SettingsUiState(
     val admno: String = "",
     val themeMode: ThemeMode = ThemeMode.DARK,
     val accentHex: String = "",
-    val customAccents: List<String> = emptyList(),
     val threshold: Int = 75,
     val semesterEndDate: String = "",
-    val selectedSemester: SemesterOption? = null,
-    val semesterOptions: List<SemesterOption> = emptyList(),
-    val semesterError: String? = null,
     val combinedAttendance: Boolean = false,
-    val isClearing: Boolean = false,
     val isExporting: Boolean = false,
     val exportMessage: String? = null,
 )
@@ -53,7 +44,6 @@ class SettingsViewModel
     constructor(
         private val preferencesStore: PreferencesStore,
         private val authRepository: AuthRepository,
-        private val attendanceRepo: AttendanceRepository,
         private val academic: AcademicDataCoordinator,
         private val dataExporter: DataExporter,
         private val usageReporter: UsageReporter,
@@ -71,35 +61,17 @@ class SettingsViewModel
                 val user = authRepository.getUserInfo()
                 val themeStr = preferencesStore.getString("theme_mode", ThemeMode.DARK.name).first()
                 val accentHex = preferencesStore.getString("accent_color", "").first()
-                val customAccents = parseCustomAccents(preferencesStore.getString("accent_customs", "").first())
                 val threshold = preferencesStore.getUserInt("attendance_threshold", 75).first()
                 val semesterEnd = preferencesStore.getUserString("semester_end_date", "").first()
                 val combinedAttendance = preferencesStore.getUserBoolean("combined_attendance").first()
-                val selectedYearId = preferencesStore.getUserString(SELECTED_SEMESTER_YEAR_KEY).first()
-                val selectedClassId = preferencesStore.getUserString(SELECTED_SEMESTER_CLASS_KEY).first()
-                val semestersResult =
-                    runCatching {
-                        user?.let {
-                            attendanceRepo.getSemesterOptions(it.admno, it.brId, false)
-                        }.orEmpty()
-                    }
-                val semesters = semestersResult.getOrDefault(emptyList())
-                val selectedSemester =
-                    semesters.firstOrNull { it.yearId == selectedYearId && it.classId == selectedClassId }
-                        ?: semesters.firstOrNull()
-
                 _state.update {
                     it.copy(
                         userName = user?.name ?: "",
                         admno = user?.admno ?: "",
                         themeMode = ThemeMode.entries.find { m -> m.name == themeStr } ?: ThemeMode.DARK,
-                        accentHex = accentHex,
-                        customAccents = customAccents,
+                        accentHex = ColorProfiles.presetHex(accentHex),
                         threshold = threshold,
                         semesterEndDate = semesterEnd,
-                        selectedSemester = selectedSemester,
-                        semesterOptions = semesters,
-                        semesterError = semestersResult.exceptionOrNull()?.message,
                         combinedAttendance = combinedAttendance,
                     )
                 }
@@ -114,32 +86,20 @@ class SettingsViewModel
         }
 
         fun setAccent(hex: String) {
-            val normalized = hex.trim().removePrefix("#").uppercase()
-            if (normalized.isNotEmpty() && ColorProfiles.parseAccent(normalized) == null) return
+            val preset = ColorProfiles.presetHex(hex)
             viewModelScope.launch {
-                preferencesStore.putString("accent_color", normalized)
-                val isPreset = ColorProfiles.accentPresets.any { it.hex.equals(normalized, ignoreCase = true) }
-                val customs =
-                    if (normalized.isBlank() || isPreset) {
-                        _state.value.customAccents
-                    } else {
-                        (listOf(normalized) + _state.value.customAccents.filterNot { it.equals(normalized, true) })
-                            .take(MAX_CUSTOM_ACCENTS)
-                    }
-                if (customs != _state.value.customAccents) {
-                    preferencesStore.putString("accent_customs", customs.joinToString(","))
-                }
-                _state.update { it.copy(accentHex = normalized, customAccents = customs) }
+                preferencesStore.putString("accent_color", preset)
+                _state.update { it.copy(accentHex = preset) }
             }
         }
 
-        fun exportAttendance() = runExport { dataExporter.exportAttendanceCsv() }
+        fun exportAttendance() = runExport { dataExporter.exportAttendancePng() }
 
-        fun exportTimetable() = runExport { dataExporter.exportTimetableIcs() }
+        fun exportTimetable() = runExport { dataExporter.exportTimetablePng() }
 
-        fun downloadAttendance() = runDownload { dataExporter.exportAttendancePdf() }
+        fun downloadAttendance() = runDownload { dataExporter.exportAttendancePng() }
 
-        fun downloadTimetable() = runDownload { dataExporter.exportTimetablePdf() }
+        fun downloadTimetable() = runDownload { dataExporter.exportTimetablePng() }
 
         fun consumeExportMessage() {
             if (_state.value.exportMessage != null) _state.update { it.copy(exportMessage = null) }
@@ -159,6 +119,8 @@ class SettingsViewModel
                         share(export)
                     }
                     usageReporter.log(UsageReporter.EXPORT)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     _state.update { it.copy(exportMessage = ErrorText.forData(e)) }
                 } finally {
@@ -173,8 +135,10 @@ class SettingsViewModel
             viewModelScope.launch {
                 _state.update { it.copy(isExporting = true) }
                 try {
-                    share(block())
+                    share(withContext(Dispatchers.IO) { block() })
                     usageReporter.log(UsageReporter.EXPORT)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     _state.update { it.copy(exportMessage = ErrorText.forData(e)) }
                 } finally {
@@ -197,13 +161,6 @@ class SettingsViewModel
             )
         }
 
-        private fun parseCustomAccents(raw: String): List<String> =
-            raw.split(",")
-                .map { it.trim().uppercase() }
-                .filter { ColorProfiles.parseAccent(it) != null }
-                .distinct()
-                .take(MAX_CUSTOM_ACCENTS)
-
         fun setThreshold(value: Int) {
             viewModelScope.launch {
                 val clamped = value.coerceIn(50, 95)
@@ -219,33 +176,10 @@ class SettingsViewModel
             }
         }
 
-        fun setSelectedSemester(option: SemesterOption) {
-            viewModelScope.launch {
-                val context = academic.activeContext.value ?: return@launch
-                preferencesStore.putString("${context.admno}_$SELECTED_SEMESTER_YEAR_KEY", option.yearId)
-                preferencesStore.putString("${context.admno}_$SELECTED_SEMESTER_CLASS_KEY", option.classId)
-                if (academic.activeContext.value != context) return@launch
-                academic.selectSemester(option)
-                _state.update { it.copy(selectedSemester = option) }
-            }
-        }
-
         fun setCombinedAttendance(enabled: Boolean) {
             viewModelScope.launch {
                 preferencesStore.putUserBoolean("combined_attendance", enabled)
                 _state.update { it.copy(combinedAttendance = enabled) }
-            }
-        }
-
-        fun clearCache() {
-            viewModelScope.launch {
-                _state.update { it.copy(isClearing = true) }
-                try {
-                    academic.clearAcademicCache()
-                    clearGeneratedFiles()
-                } finally {
-                    _state.update { it.copy(isClearing = false) }
-                }
             }
         }
 
@@ -264,9 +198,5 @@ class SettingsViewModel
             listOf("report_cards", "exports").forEach { child ->
                 appContext.cacheDir.resolve(child).deleteRecursively()
             }
-        }
-
-        private companion object {
-            const val MAX_CUSTOM_ACCENTS = 6
         }
     }

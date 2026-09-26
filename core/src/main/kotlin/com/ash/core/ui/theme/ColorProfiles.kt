@@ -70,6 +70,9 @@ object ColorProfiles {
             AccentPreset("Violet", "9B87F5"),
         )
 
+    fun presetHex(hex: String): String =
+        accentPresets.firstOrNull { it.hex.equals(hex.trim().removePrefix("#"), ignoreCase = true) }?.hex.orEmpty()
+
     fun parseAccent(hex: String): Color? {
         val cleaned = hex.trim().removePrefix("#")
         if (cleaned.length != 6 || cleaned.any { it.digitToIntOrNull(16) == null }) return null

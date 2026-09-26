@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -22,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.ash.axis.ui.BottomSpacer
 import com.ash.core.ui.theme.AppDimens
 
 @Suppress("LongMethod")
@@ -55,17 +55,13 @@ fun SettingsScreen(
 
         item { SectionLabel("APPEARANCE") }
         item { ThemeSelector(state.themeMode, viewModel::setThemeMode) }
-        item { AccentSelector(state.accentHex, state.customAccents, viewModel::setAccent) }
+        item { AccentSelector(state.accentHex, viewModel::setAccent) }
 
         item { SectionLabel("ATTENDANCE") }
         item {
             AttendanceSettings(
                 threshold = state.threshold,
                 onThresholdChange = viewModel::setThreshold,
-                selectedSemester = state.selectedSemester,
-                semesterOptions = state.semesterOptions,
-                semesterError = state.semesterError,
-                onSemesterChange = viewModel::setSelectedSemester,
                 semesterEndDate = state.semesterEndDate,
                 onSemesterEndDateChange = viewModel::setSemesterEndDate,
                 combinedAttendance = state.combinedAttendance,
@@ -84,14 +80,10 @@ fun SettingsScreen(
             )
         }
 
-        item { SectionLabel("SECURITY & DATA") }
-        item { SecuritySettings(state, viewModel) }
-
         item { SectionLabel("UPDATES") }
         item { UpdateSettings() }
 
-        item { SectionLabel("SUPPORT & ABOUT") }
-        item { SupportAboutSettings(context = context) }
+        item { BugsAndFixesSettings(context = context) }
 
         item {
             TextButton(
@@ -102,6 +94,6 @@ fun SettingsScreen(
             }
         }
 
-        item { Spacer(Modifier.navigationBarsPadding().height(24.dp)) }
+        item { BottomSpacer() }
     }
 }

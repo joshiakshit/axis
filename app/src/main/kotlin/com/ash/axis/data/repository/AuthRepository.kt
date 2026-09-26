@@ -82,7 +82,6 @@ class AuthRepository
             tokenManager.setActiveAdmno(userInfo.admno)
             tokenManager.saveTokens(token.accessToken, token.refreshToken)
             tokenManager.saveUserMeta(userInfo.email, userInfo.phoneNumber.ifBlank { contact })
-            tokenManager.addAccount(admno = userInfo.admno, name = userInfo.name, email = userInfo.email)
             return userInfo
         }
 

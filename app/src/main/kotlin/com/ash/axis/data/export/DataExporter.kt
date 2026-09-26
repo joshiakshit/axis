@@ -7,8 +7,6 @@ import android.os.Environment
 import android.provider.MediaStore
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
-import com.ash.axis.data.repository.SELECTED_SEMESTER_CLASS_KEY
-import com.ash.axis.data.repository.SELECTED_SEMESTER_YEAR_KEY
 import com.ash.axis.data.repository.TimetableRepository
 import com.ash.axis.domain.model.AttendanceResponse
 import com.ash.axis.domain.model.SemesterOption
@@ -20,8 +18,6 @@ import kotlinx.coroutines.flow.first
 import java.io.File
 import java.time.DayOfWeek
 import java.time.LocalDate
-import java.time.ZoneId
-import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -48,8 +44,6 @@ class DataExporter
         private val preferencesStore: PreferencesStore,
         @ApplicationContext private val appContext: Context,
     ) {
-        private val dayOrder = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-
         private data class Attendance(val semester: SemesterOption, val data: AttendanceResponse)
 
         private data class ViewWeek(
@@ -60,9 +54,7 @@ class DataExporter
 
         private suspend fun loadAttendance(): Attendance {
             val user = authRepository.getUserInfo() ?: error("Not logged in")
-            val yearId = preferencesStore.getUserString(SELECTED_SEMESTER_YEAR_KEY).first()
-            val classId = preferencesStore.getUserString(SELECTED_SEMESTER_CLASS_KEY).first()
-            val semester = attendanceRepo.getPreferredSemester(user.admno, user.brId, yearId, classId, false)
+            val semester = attendanceRepo.getLatestSemester(user.admno, user.brId)
             val data = attendanceRepo.getAttendance(user.admno, user.brId, semester.classId, semester.yearId, false)
             return Attendance(semester, data)
         }
@@ -88,78 +80,35 @@ class DataExporter
             end: LocalDate,
         ): String = "${start.format(rangeFormat)} – ${end.format(rangeFormat)}"
 
-        suspend fun exportAttendanceCsv(): ExportFile {
-            val (semester, data) = loadAttendance()
-            val file = writeTextFile("axis-attendance-${LocalDate.now()}.csv", buildAttendanceCsv(data))
-            return ExportFile(file, "text/csv", "Attendance — ${semester.label}")
-        }
-
-        suspend fun exportTimetableIcs(): ExportFile {
-            val (week, start, end) = loadViewWeek()
-            val file = writeTextFile("axis-timetable-$start.ics", buildTimetableIcs(week, start, end))
-            return ExportFile(file, "text/calendar", "Timetable — ${weekLabel(start, end)}")
-        }
-
-        suspend fun exportAttendancePdf(): ExportFile {
+        suspend fun exportAttendancePng(): ExportFile {
             val (semester, data) = loadAttendance()
             val rows =
-                data.table.values.sortedByDescending { it.total }.map { e ->
-                    PdfTableRow(
-                        listOf(
-                            clip(e.subname, MAX_SUBJECT_CHARS),
-                            e.subCode,
-                            e.lecType,
-                            e.present.toString(),
-                            e.total.toString(),
-                            formatPercent(e.percent),
-                        ),
+                data.table.values.sortedByDescending { it.total }.map { entry ->
+                    ImageRow(
+                        entry.subname,
+                        "${entry.subCode} · ${entry.lecType} · ${entry.present}/${entry.total} attended · ${formatPercent(entry.percent)}%",
                     )
-                }
-            val overall =
-                PdfTableRow(
-                    listOf(
-                        "Overall",
-                        "",
-                        "",
-                        data.endrow.present.toString(),
-                        data.endrow.total.toString(),
-                        formatPercent(data.endrow.percentage),
-                    ),
-                    bold = true,
-                )
-            val file = File(exportsDir(), "axis-attendance-${LocalDate.now()}.pdf")
-            PdfDocuments.writeTable(
-                file = file,
-                title = "Attendance",
-                subtitle = "${semester.label} · generated ${LocalDate.now()}",
-                headers = listOf("Subject", "Code", "Type", "Present", "Total", "%"),
-                weights = listOf(3.4f, 1.3f, 0.8f, 1.0f, 0.9f, 0.9f),
-                rows = rows + overall,
-            )
-            return ExportFile(file, "application/pdf", "Attendance — ${semester.label}")
+                } + ImageRow("Overall", "${data.endrow.present}/${data.endrow.total} attended · ${formatPercent(data.endrow.percentage)}%")
+            val file = File(exportsDir(), "axis-attendance-${LocalDate.now()}.png")
+            PngDocuments.write(file, "Attendance", "${semester.label} · ${LocalDate.now()}", rows)
+            return ExportFile(file, "image/png", "Attendance - ${semester.label}")
         }
 
-        suspend fun exportTimetablePdf(): ExportFile {
+        suspend fun exportTimetablePng(): ExportFile {
             val (week, start, end) = loadViewWeek()
-            val sections =
-                (0..6).mapNotNull { i ->
-                    val date = start.plusDays(i.toLong())
-                    val slots = timetableUseCase.sortSlotsByTime(week[date] ?: emptyList())
+            val rows =
+                (0..6).flatMap { day ->
+                    val date = start.plusDays(day.toLong())
+                    val slots = timetableUseCase.sortSlotsByTime(week[date].orEmpty())
                     if (slots.isEmpty()) {
-                        null
+                        emptyList()
                     } else {
-                        PdfSection(heading = date.format(dayHeadingFormat), lines = slots.map { slotLine(it) })
+                        listOf(ImageRow(date.format(dayHeadingFormat), slots.joinToString("\n", transform = ::slotLine)))
                     }
-                }
-            val file = File(exportsDir(), "axis-timetable-$start.pdf")
-            PdfDocuments.writeSections(
-                file = file,
-                title = "Timetable",
-                subtitle = weekLabel(start, end),
-                sections = sections,
-                emptyText = "No classes scheduled this week.",
-            )
-            return ExportFile(file, "application/pdf", "Timetable — ${weekLabel(start, end)}")
+                }.ifEmpty { listOf(ImageRow("No classes scheduled this week.", "")) }
+            val file = File(exportsDir(), "axis-timetable-$start.png")
+            PngDocuments.write(file, "Timetable", weekLabel(start, end), rows)
+            return ExportFile(file, "image/png", "Timetable - ${weekLabel(start, end)}")
         }
 
         private fun slotLine(slot: TimetableSlot): String {
@@ -171,6 +120,7 @@ class DataExporter
         }
 
         // Return false before Android 10 so the caller can use the share sheet.
+        @Suppress("TooGenericExceptionCaught")
         fun saveToDownloads(export: ExportFile): Boolean {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
             val resolver = appContext.contentResolver
@@ -182,126 +132,24 @@ class DataExporter
                     put(MediaStore.Downloads.IS_PENDING, 1)
                 }
             val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return false
-            resolver.openOutputStream(uri)?.use { out -> export.file.inputStream().use { it.copyTo(out) } }
-                ?: return false
-            values.clear()
-            values.put(MediaStore.Downloads.IS_PENDING, 0)
-            resolver.update(uri, values, null, null)
-            return true
+            try {
+                val output = resolver.openOutputStream(uri) ?: error("Cannot save image to Downloads")
+                output.use { out -> export.file.inputStream().use { it.copyTo(out) } }
+                values.clear()
+                values.put(MediaStore.Downloads.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+                return true
+            } catch (error: Exception) {
+                resolver.delete(uri, null, null)
+                throw error
+            }
         }
 
         private fun exportsDir(): File = File(appContext.cacheDir, "exports").apply { mkdirs() }
 
-        private fun clip(
-            text: String,
-            max: Int,
-        ): String = if (text.length <= max) text else text.take(max - 1).trimEnd() + "…"
-
-        private fun buildAttendanceCsv(attendance: AttendanceResponse): String =
-            buildString {
-                append("Subject,Code,Type,Present,Total,Percentage\r\n")
-                attendance.table.values
-                    .sortedByDescending { it.total }
-                    .forEach { e ->
-                        append(csvCell(e.subname))
-                        append(',').append(csvCell(e.subCode))
-                        append(',').append(csvCell(e.lecType))
-                        append(',').append(e.present)
-                        append(',').append(e.total)
-                        append(',').append(formatPercent(e.percent))
-                        append("\r\n")
-                    }
-                val end = attendance.endrow
-                append(csvCell("Overall")).append(",,,")
-                append(end.present).append(',').append(end.total).append(',')
-                append(formatPercent(end.percentage)).append("\r\n")
-            }
-
-        private fun buildTimetableIcs(
-            week: Map<LocalDate, List<TimetableSlot>>,
-            weekStart: LocalDate,
-            weekEnd: LocalDate,
-        ): String {
-            val stamp = ZonedDateTime.now(ZoneId.of("UTC")).format(stampFormat)
-            val builder = StringBuilder()
-            builder.append("BEGIN:VCALENDAR\r\n")
-            builder.append("VERSION:2.0\r\n")
-            builder.append("PRODID:-//Axis//Timetable//EN\r\n")
-            builder.append("CALSCALE:GREGORIAN\r\n")
-            builder.append("METHOD:PUBLISH\r\n")
-            foldInto(builder, "X-WR-CALNAME:Axis Timetable ${weekStart.format(rangeFormat)}-${weekEnd.format(rangeFormat)}")
-            for (i in 0..6) {
-                val date = weekStart.plusDays(i.toLong())
-                val dayName = dayOrder[i]
-                timetableUseCase.sortSlotsByTime(week[date] ?: emptyList()).forEach { slot ->
-                    appendEvent(builder, date, dayName, slot, stamp)
-                }
-            }
-            builder.append("END:VCALENDAR\r\n")
-            return builder.toString()
-        }
-
-        private fun appendEvent(
-            builder: StringBuilder,
-            date: LocalDate,
-            dayName: String,
-            slot: TimetableSlot,
-            stamp: String,
-        ) {
-            val start = timeStamp(date, slot.fromTime) ?: return
-            val end = timeStamp(date, slot.toTime) ?: return
-            val name = timetableUseCase.displaySubjectName(slot).ifBlank { slot.subCode }
-            val type = lectureLabel(slot.lectType)
-            val summary = if (type.isNotBlank()) "$name ($type)" else name
-
-            builder.append("BEGIN:VEVENT\r\n")
-            builder.append("UID:").append(date).append('-').append(digits(slot.fromTime))
-            builder.append('-').append(digits(slot.subjectId.ifBlank { slot.subCode })).append("@axis\r\n")
-            builder.append("DTSTAMP:").append(stamp).append("\r\n")
-            builder.append("DTSTART:").append(start).append("\r\n")
-            builder.append("DTEND:").append(end).append("\r\n")
-            foldInto(builder, "SUMMARY:${icsText(summary)}")
-            if (slot.roomno.isNotBlank()) foldInto(builder, "LOCATION:${icsText(slot.roomno)}")
-            val descBits = listOfNotNull(slot.subCode.ifBlank { null }, dayName).joinToString(" · ")
-            if (descBits.isNotBlank()) foldInto(builder, "DESCRIPTION:${icsText(descBits)}")
-            builder.append("END:VEVENT\r\n")
-        }
-
-        private fun writeTextFile(
-            name: String,
-            content: String,
-        ): File = File(exportsDir(), name).apply { writeText(content) }
-
         private fun parseDate(raw: String): LocalDate? = runCatching { LocalDate.parse(raw) }.getOrNull()
 
         private fun formatPercent(value: Double): String = String.format(java.util.Locale.ENGLISH, "%.2f", value)
-
-        private fun csvCell(value: String): String =
-            if (value.any { it in CSV_SPECIALS }) {
-                "\"${value.replace("\"", "\"\"")}\""
-            } else {
-                value
-            }
-
-        // ICS uses floating local time: YYYYMMDDTHHMMSS.
-        private fun timeStamp(
-            date: LocalDate,
-            time: String,
-        ): String? {
-            val parts = time.split(":")
-            val hour = parts.getOrNull(0)?.trim()?.toIntOrNull() ?: return null
-            val minute = parts.getOrNull(1)?.trim()?.toIntOrNull() ?: return null
-            return "%04d%02d%02dT%02d%02d00".format(date.year, date.monthValue, date.dayOfMonth, hour, minute)
-        }
-
-        private fun digits(value: String): String = value.filter { it.isLetterOrDigit() }.ifBlank { "x" }
-
-        private fun icsText(value: String): String =
-            value
-                .replace("\\", "\\\\")
-                .replace(";", "\\;")
-                .replace(",", "\\,")
-                .replace("\n", "\\n")
 
         private fun lectureLabel(lectType: String): String =
             when {
@@ -311,27 +159,8 @@ class DataExporter
                 else -> "LEC"
             }
 
-        // RFC 5545 limits content lines to 75 octets, including continuation spaces.
-        private fun foldInto(
-            builder: StringBuilder,
-            line: String,
-        ) {
-            var remaining = line
-            var limit = FOLD_LIMIT
-            while (remaining.length > limit) {
-                builder.append(remaining, 0, limit).append("\r\n ")
-                remaining = remaining.substring(limit)
-                limit = FOLD_LIMIT - 1 // account for the leading space on continuation lines
-            }
-            builder.append(remaining).append("\r\n")
-        }
-
         private companion object {
-            const val FOLD_LIMIT = 74
-            const val MAX_SUBJECT_CHARS = 42
-            val CSV_SPECIALS = charArrayOf(',', '"', '\n', '\r')
             val rangeFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("dd MMM", java.util.Locale.ENGLISH)
-            val stampFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'", java.util.Locale.ENGLISH)
             val dayHeadingFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE dd MMM", java.util.Locale.ENGLISH)
         }
     }

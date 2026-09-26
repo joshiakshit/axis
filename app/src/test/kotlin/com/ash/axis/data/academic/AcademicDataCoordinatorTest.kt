@@ -75,38 +75,6 @@ class AcademicDataCoordinatorTest {
         }
 
     @Test
-    fun `required planner weeks continue after a new visible week`() =
-        runTest {
-            val attendance = mockk<AttendanceRepository>(relaxed = true)
-            val timetable = mockk<TimetableRepository>(relaxed = true)
-            val auth = mockk<AuthRepository>()
-            val context = StudentRequestContext("21001", 11, "clientMixedCase", "2026-2027")
-            val first = LocalDate.parse("2026-09-07")
-            val second = first.plusWeeks(1)
-            val pending = MutableStateFlow(AcademicSnapshot<TimetableData>(refreshing = true))
-            val firstStarted = CompletableDeferred<Unit>()
-            val secondStarted = CompletableDeferred<Unit>()
-            coEvery { timetable.requestWeek(any(), any()) } returns MutableStateFlow(AcademicSnapshot())
-            coEvery { timetable.requestRequiredWeek(any()) } coAnswers {
-                if (firstArg<TimetableKey>().startDate == first.toString()) firstStarted.complete(Unit) else secondStarted.complete(Unit)
-                pending
-            }
-            val coordinator = AcademicDataCoordinator(attendance, timetable, auth)
-
-            coordinator.activate(context, null, first)
-            coordinator.plannerCoverage(listOf(first, second))
-            firstStarted.await()
-            coordinator.timetableVisible(first.plusWeeks(4))
-            pending.value = AcademicSnapshot()
-            secondStarted.await()
-
-            coVerify(exactly = 1) {
-                timetable.requestRequiredWeek(TimetableKey(context, second.toString(), second.plusDays(6).toString()))
-            }
-            coordinator.deactivate()
-        }
-
-    @Test
     fun `confirmed QR invalidates only the originating active account`() =
         runTest {
             val attendance = mockk<AttendanceRepository>(relaxed = true)
@@ -130,7 +98,7 @@ class AcademicDataCoordinatorTest {
         }
 
     @Test
-    fun `late semester discovery cannot replace a manual selection`() =
+    fun `late semester discovery cannot replace a newer discovery`() =
         runTest {
             val attendance = mockk<AttendanceRepository>(relaxed = true)
             val timetable = mockk<TimetableRepository>(relaxed = true)
@@ -138,7 +106,7 @@ class AcademicDataCoordinatorTest {
             val context = StudentRequestContext("A", 1, "Client", "2026")
             val pending = CompletableDeferred<SemesterOption>()
             val started = CompletableDeferred<Unit>()
-            coEvery { attendance.getPreferredSemester(any(), any(), any(), any(), any()) } coAnswers {
+            coEvery { attendance.getLatestSemester(any(), any(), any()) } coAnswers {
                 started.complete(Unit)
                 pending.await()
             }
@@ -146,7 +114,8 @@ class AcademicDataCoordinatorTest {
             val discovery = async { coordinator.discoverSemester() }
             started.await()
             val chosen = SemesterOption("Y2", "C2", "Chosen")
-            coordinator.selectSemester(chosen)
+            coEvery { attendance.getLatestSemester(any(), any(), any()) } returns chosen
+            coordinator.discoverSemester()
             pending.complete(SemesterOption("Y1", "C1", "Old"))
             discovery.await()
 

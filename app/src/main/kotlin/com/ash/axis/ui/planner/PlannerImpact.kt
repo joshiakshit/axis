@@ -1,180 +1,48 @@
 package com.ash.axis.ui.planner
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.ash.axis.domain.usecase.AttendanceTone
 import com.ash.axis.domain.usecase.ProjectedSubject
-import com.ash.core.ui.theme.AppShapes
-import com.ash.core.ui.theme.cardColor
+import com.ash.core.ui.components.AppCard
 import java.util.Locale
 
-@Suppress("LongMethod", "CyclomaticComplexMethod")
 @Composable
 internal fun ImpactCard(
     row: ProjectedSubject,
     threshold: Int,
-    showProjection: Boolean,
-    modifier: Modifier = Modifier,
 ) {
-    val displayedPercent = if (showProjection) row.projectedPercent else row.maxReachable ?: row.projectedPercent
-    val projColor =
-        if (!showProjection) {
-            if (displayedPercent >= threshold) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-        } else {
-            when (row.projectedTone) {
-                AttendanceTone.OK -> MaterialTheme.colorScheme.primary
-                AttendanceTone.WARN -> MaterialTheme.colorScheme.tertiary
-                AttendanceTone.BAD -> MaterialTheme.colorScheme.error
-            }
-        }
-
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = AppShapes.medium,
-        color = cardColor(),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text(
-                        row.name,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    Surface(
-                        shape = AppShapes.small,
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    ) {
-                        Text(
-                            when {
-                                row.lecType.equals("PP+PR", ignoreCase = true) -> "PP+PR"
-                                row.lecType.equals("PR", ignoreCase = true) -> "PR"
-                                else -> "PP"
-                            },
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
-                val ratioText =
-                    remember(
-                        row.currentPresent,
-                        row.currentTotal,
-                        row.projectedPresent,
-                        row.projectedTotal,
-                        row.maxPresent,
-                        row.maxTotal,
-                        showProjection,
-                    ) {
-                        if (showProjection) {
-                            "${row.currentPresent}/${row.currentTotal} → ${row.projectedPresent}/${row.projectedTotal}"
-                        } else {
-                            "${row.projectedPresent}/${row.projectedTotal} → ${row.maxPresent}/${row.maxTotal}"
-                        }
-                    }
+    val belowTarget = row.projectedPercent < threshold
+    AppCard {
+        Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("${row.name} · ${row.lecType}", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                 Text(
-                    ratioText,
-                    fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    String.format(Locale.US, "%.1f%% → %.1f%%", row.currentPercent, row.projectedPercent),
+                    color = if (belowTarget) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.titleSmall,
                 )
-                val maximum = row.maxReachable
-                if (showProjection && maximum != null) {
-                    val maxPresent = row.maxPresent
-                    val maxTotal = row.maxTotal
-                    if (maxPresent != null && maxTotal != null) {
-                        val canRecover = maximum >= threshold
-                        val maxText =
-                            remember(maximum, maxPresent, maxTotal) {
-                                "Best by semester end: ${String.format(Locale.US, "%.1f", maximum)}% " +
-                                    "($maxPresent/$maxTotal)"
-                            }
-                        Text(
-                            maxText,
-                            fontSize = 11.sp,
-                            color =
-                                if (canRecover) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.error
-                                },
-                        )
-                    }
-                }
             }
-            Column(horizontalAlignment = Alignment.End) {
-                val projText =
-                    remember(displayedPercent) {
-                        String.format(Locale.US, "%.1f%%", displayedPercent)
-                    }
-                Text(
-                    projText,
-                    fontSize = 20.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = projColor,
-                    fontWeight = FontWeight.Bold,
-                )
-                if (!showProjection) {
-                    Text(
-                        "MAX",
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else if (row.projectedTone != row.baselineTone) {
-                    Surface(
-                        shape = AppShapes.small,
-                        color =
-                            if (row.projectedTone == AttendanceTone.BAD) {
-                                MaterialTheme.colorScheme.errorContainer
-                            } else {
-                                MaterialTheme.colorScheme.tertiaryContainer
-                            },
-                    ) {
-                        Text(
-                            if (row.projectedTone == AttendanceTone.BAD) "DANGER" else "WARN",
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                            fontSize = 9.sp,
-                            color =
-                                if (row.projectedTone == AttendanceTone.BAD) {
-                                    MaterialTheme.colorScheme.onErrorContainer
-                                } else {
-                                    MaterialTheme.colorScheme.onTertiaryContainer
-                                },
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                }
-            }
+            Text(
+                "${row.currentPresent}/${row.currentTotal} → ${row.projectedPresent}/${row.projectedTotal} classes",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                when {
+                    row.weeklyClasses == 0 -> "No matching classes in the weekly timetable"
+                    belowTarget -> "Below target · ${row.absencesPlanned} classes missed in this forecast"
+                    else -> "${row.absencesPlanned} classes missed in this forecast"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

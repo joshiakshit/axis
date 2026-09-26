@@ -11,9 +11,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.ash.axis.ui.CalendarSection
 import com.ash.core.ui.components.OfflineBanner
 import com.ash.core.ui.theme.AppDimens
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -37,7 +37,7 @@ internal fun TimetableContent(
 
     // Use settledPage to avoid fetching intermediate dates during jumps.
     LaunchedEffect(pagerState, anchor) {
-        snapshotSettledPages(pagerState)
+        snapshotFlow { pagerState.settledPage }
             .drop(1)
             .distinctUntilChanged()
             .collect { page -> viewModel.onDateShown(dateForPage(anchor, page)) }
@@ -79,12 +79,6 @@ internal fun TimetableContent(
             onSelect = viewModel::jumpTo,
         )
         Spacer(Modifier.height(8.dp))
-        CalendarSection(
-            data.calendar,
-            onRefresh = { viewModel.loadCalendar(true) },
-            modifier = Modifier.padding(horizontal = AppDimens.screenPadding),
-            date = data.currentDate,
-        )
         TimetableDayPager(
             anchor = anchor,
             pagerState = pagerState,

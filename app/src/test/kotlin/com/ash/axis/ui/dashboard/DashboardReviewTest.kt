@@ -100,7 +100,7 @@ class DashboardReviewTest {
         every { auth.getUserInfo() } returns UserInfo("A", 1, "Alex", "", "", "Client")
         every { network.isOnline } returns flowOf(true)
         coEvery { attendance.observeSummary(any()) } returns MutableStateFlow(AcademicSnapshot<AttendanceResponse>())
-        coEvery { attendance.getPreferredSemester(any(), any(), any(), any(), any()) } throws
+        coEvery { attendance.getLatestSemester(any(), any(), any()) } throws
             IllegalStateException("semester offline")
         return DashboardViewModel(
             attendance,

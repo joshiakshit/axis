@@ -77,8 +77,6 @@ class TimetableRepository
             return timetable.request(key, force)
         }
 
-        suspend fun requestRequiredWeek(key: TimetableKey): StateFlow<AcademicSnapshot<TimetableData>> = timetable.request(key)
-
         suspend fun requestPrefetchWeek(key: TimetableKey): StateFlow<AcademicSnapshot<TimetableData>> =
             timetable.request(key, speculative = true)
 

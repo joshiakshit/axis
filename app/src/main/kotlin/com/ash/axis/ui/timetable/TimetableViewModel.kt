@@ -4,15 +4,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ash.axis.data.academic.AcademicDataCoordinator
 import com.ash.axis.data.export.ExportKeys
-import com.ash.axis.data.repository.AuthRepository
-import com.ash.axis.data.repository.CalendarRepository
 import com.ash.axis.data.repository.TimetableKey
 import com.ash.axis.data.repository.TimetableRepository
 import com.ash.axis.domain.model.TimetableSlot
 import com.ash.axis.domain.usecase.TimetableUseCase
-import com.ash.axis.ui.CalendarUiState
 import com.ash.axis.ui.ErrorText
-import com.ash.axis.ui.loadState
 import com.ash.core.network.NetworkMonitor
 import com.ash.core.storage.PreferencesStore
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -55,10 +51,7 @@ sealed interface TimetableItem {
 }
 
 data class TimetableDay(
-    val dayName: String,
-    val dayOfMonth: Int = 0,
     val items: ImmutableList<TimetableItem> = persistentListOf(),
-    val holiday: String? = null,
 )
 
 data class TimetableUiState(
@@ -69,13 +62,11 @@ data class TimetableUiState(
     val currentDate: LocalDate = LocalDate.now(),
     val dayCache: ImmutableMap<LocalDate, TimetableDay> = persistentMapOf(),
     val loadedWeeks: ImmutableSet<LocalDate> = persistentSetOf(),
-    val loadingWeeks: ImmutableSet<LocalDate> = persistentSetOf(),
     val failedWeeks: ImmutableSet<LocalDate> = persistentSetOf(),
     // The pager clears this request with consumeJump() after scrolling.
     val jumpTarget: LocalDate? = null,
     val isRefreshing: Boolean = false,
     val isOffline: Boolean = false,
-    val calendar: CalendarUiState = CalendarUiState(),
 )
 
 @HiltViewModel
@@ -85,8 +76,6 @@ class TimetableViewModel
     constructor(
         private val timetableRepo: TimetableRepository,
         private val coordinator: AcademicDataCoordinator,
-        private val authRepository: AuthRepository,
-        private val calendarRepo: CalendarRepository,
         private val timetableUseCase: TimetableUseCase,
         private val preferencesStore: PreferencesStore,
         private val networkMonitor: NetworkMonitor,
@@ -98,8 +87,6 @@ class TimetableViewModel
 
         private val weekJobs = mutableMapOf<LocalDate, Job>()
         private var boundContext = coordinator.activeContext.value
-        private var calendarJob: Job? = null
-        private var calendarMonth: LocalDate? = null
 
         init {
             val today = LocalDate.now()
@@ -114,7 +101,6 @@ class TimetableViewModel
                         it.copy(
                             dayCache = persistentMapOf(),
                             loadedWeeks = persistentSetOf(),
-                            loadingWeeks = persistentSetOf(),
                             failedWeeks = persistentSetOf(),
                             isLoading = context != null,
                             error = null,
@@ -125,7 +111,6 @@ class TimetableViewModel
             }
             ensureWeek(today)
             startProgressTicker()
-            loadCalendar()
             viewModelScope.launch { networkMonitor.isOnline.collect { online -> _state.update { it.copy(isOffline = !online) } } }
             viewModelScope.launch {
                 coordinator.timetableDemandError.collect { error ->
@@ -138,14 +123,12 @@ class TimetableViewModel
 
         fun onDateShown(date: LocalDate) {
             if (_state.value.currentDate != date) _state.update { it.copy(currentDate = date) }
-            loadCalendar()
             persistViewDate(date)
             ensureWeek(date)
         }
 
         fun jumpTo(date: LocalDate) {
             _state.update { it.copy(currentDate = date, jumpTarget = date) }
-            loadCalendar()
             persistViewDate(date)
             ensureWeek(date)
         }
@@ -163,7 +146,6 @@ class TimetableViewModel
         fun retryWeek(date: LocalDate) = bindWeek(date, retry = true)
 
         fun refresh() {
-            loadCalendar(forceRefresh = true)
             viewModelScope.launch {
                 try {
                     coordinator.refreshTimetable()
@@ -214,7 +196,7 @@ class TimetableViewModel
                                     (0..6).associate { i ->
                                         val day = ws.plusDays(i.toLong())
                                         val slots = data.dated?.get(day.toString()) ?: data.weekly[dayOrder[i]].orEmpty()
-                                        day to buildDay(day, dayOrder[i], slots)
+                                        day to buildDay(day, slots)
                                     }
                                 }
                             _state.update { current ->
@@ -226,12 +208,6 @@ class TimetableViewModel
                                             (current.loadedWeeks - ws).toImmutableSet()
                                         } else {
                                             (current.loadedWeeks + ws).toImmutableSet()
-                                        },
-                                    loadingWeeks =
-                                        if (result.refreshing) {
-                                            (current.loadingWeeks + ws).toImmutableSet()
-                                        } else {
-                                            (current.loadingWeeks - ws).toImmutableSet()
                                         },
                                     failedWeeks =
                                         if (result.error != null && days == null) {
@@ -256,7 +232,6 @@ class TimetableViewModel
         @Suppress("CyclomaticComplexMethod")
         private fun buildDay(
             date: LocalDate,
-            dayName: String,
             slots: List<TimetableSlot>,
         ): TimetableDay {
             val isToday = date == LocalDate.now()
@@ -294,11 +269,7 @@ class TimetableViewModel
                 )
             }
 
-            return TimetableDay(
-                dayName = dayName,
-                dayOfMonth = date.dayOfMonth,
-                items = items.toImmutableList(),
-            )
+            return TimetableDay(items = items.toImmutableList())
         }
 
         @Suppress("MagicNumber")
@@ -313,31 +284,12 @@ class TimetableViewModel
                         val data = timetableRepo.observeWeek(TimetableKey(context, ws.toString(), ws.plusDays(6).toString())).value.data
                         val dayName = dayOrder[(today.dayOfWeek.value - 1).coerceIn(0, 6)]
                         if (data != null) {
-                            val rebuilt = buildDay(today, dayName, data.dated?.get(today.toString()) ?: data.weekly[dayName].orEmpty())
+                            val rebuilt = buildDay(today, data.dated?.get(today.toString()) ?: data.weekly[dayName].orEmpty())
                             _state.update { it.copy(dayCache = (it.dayCache + (today to rebuilt)).toImmutableMap()) }
                         }
                     }
                 }
             }
-        }
-
-        fun loadCalendar(forceRefresh: Boolean = false) {
-            val month = _state.value.currentDate.withDayOfMonth(1)
-            if (!forceRefresh && calendarMonth == month) return
-            calendarMonth = month
-            calendarJob?.cancel()
-            _state.update { it.copy(calendar = CalendarUiState()) }
-            calendarJob =
-                viewModelScope.launch {
-                    val user = authRepository.getUserInfo()
-                    val calendar =
-                        if (user == null) {
-                            CalendarUiState(isLoading = false, error = "Sign in to load the calendar")
-                        } else {
-                            calendarRepo.loadState(user, month, forceRefresh)
-                        }
-                    _state.update { it.copy(calendar = calendar) }
-                }
         }
 
         private fun weekStart(date: LocalDate): LocalDate = date.with(DayOfWeek.MONDAY)

@@ -54,7 +54,7 @@ class DaywiseReviewTest {
             every { coordinator.selectedSemester } returns selection
             every { coordinator.daywiseDemandError } returns demandError
             every { network.isOnline } returns flowOf(true)
-            coEvery { attendance.getPreferredSemester(any(), any(), any(), any(), any()) } coAnswers {
+            coEvery { attendance.getLatestSemester(any(), any(), any()) } coAnswers {
                 if (!metadataAvailable) error("semester offline")
                 SemesterOption("Y1", "C1", "Semester 1")
             }
@@ -62,7 +62,7 @@ class DaywiseReviewTest {
                 if (firstArg<DaywiseKey>().year == "Y1") daily else nextRange
             }
             coEvery { coordinator.daywiseVisible(any(), any(), any()) } returns Unit
-            coEvery { coordinator.discoverSemester(any(), any()) } coAnswers {
+            coEvery { coordinator.discoverSemester() } coAnswers {
                 if (metadataAvailable) selection.value = AcademicSemesterSelection(context, SemesterOption("Y1", "C1", "Semester 1"))
             }
             val viewModel = DaywiseViewModel(attendance, coordinator, network)

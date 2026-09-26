@@ -42,14 +42,14 @@ internal fun ExportSettings(
             }
             ExportRow(
                 label = "Export attendance",
-                subtitle = "Share CSV · download PDF",
+                subtitle = "Share or save PNG image",
                 enabled = !isExporting,
                 onShare = onShareAttendance,
                 onDownload = onDownloadAttendance,
             )
             ExportRow(
                 label = "Export timetable",
-                subtitle = "The week you're viewing · share ICS · download PDF",
+                subtitle = "Current timetable week · PNG image",
                 enabled = !isExporting,
                 onShare = onShareTimetable,
                 onDownload = onDownloadTimetable,
@@ -95,7 +95,7 @@ private fun ExportRow(
         IconButton(onClick = onDownload, enabled = enabled) {
             Icon(
                 Icons.Filled.Download,
-                contentDescription = "Download PDF",
+                contentDescription = "Save PNG",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(20.dp),
             )

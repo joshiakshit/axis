@@ -27,6 +27,8 @@ class UpdateViewModel
         val checking: StateFlow<Boolean> = mutableChecking.asStateFlow()
         private val mutableChecked = MutableStateFlow(false)
         val checked: StateFlow<Boolean> = mutableChecked.asStateFlow()
+        private val mutableCheckError = MutableStateFlow<String?>(null)
+        val checkError: StateFlow<String?> = mutableCheckError.asStateFlow()
         private val mutableCompletedVersion = MutableStateFlow(installer.consumeCompletedVersion())
         val completedVersion: StateFlow<String?> = mutableCompletedVersion.asStateFlow()
 
@@ -36,12 +38,23 @@ class UpdateViewModel
             viewModelScope.launch { installer.downloadAndInstall(url) }
         }
 
+        @Suppress("TooGenericExceptionCaught")
         fun checkForUpdates() {
+            if (mutableChecking.value) return
+            mutableChecking.value = true
             viewModelScope.launch {
-                mutableChecking.value = true
-                remoteConfig.refresh()
-                mutableChecking.value = false
-                mutableChecked.value = true
+                mutableCheckError.value = null
+                mutableChecked.value = false
+                try {
+                    mutableChecked.value = remoteConfig.refresh()
+                    if (!mutableChecked.value) mutableCheckError.value = "Could not check for updates. Try again."
+                } catch (error: kotlinx.coroutines.CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    mutableCheckError.value = "Could not check for updates. Try again."
+                } finally {
+                    mutableChecking.value = false
+                }
             }
         }
 

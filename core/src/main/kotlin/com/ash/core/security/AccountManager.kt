@@ -8,17 +8,8 @@ import javax.inject.Singleton
 
 data class AccountState(
     val activeAdmno: String? = null,
-    val accounts: List<AccountEntry> = emptyList(),
 ) {
-    val activeAccount: AccountEntry?
-        get() = accounts.firstOrNull { it.admno == activeAdmno }
-
-    val isLoggedIn: Boolean
-        get() = activeAdmno != null && accounts.isNotEmpty()
-
-    companion object {
-        const val MAX_ACCOUNTS = 5
-    }
+    val isLoggedIn: Boolean get() = activeAdmno != null
 }
 
 @Singleton
@@ -32,24 +23,10 @@ class AccountManager
 
         private fun readState(): AccountState =
             AccountState(
-                activeAdmno = tokenManager.getActiveAdmno(),
-                accounts = tokenManager.getAccountList(),
+                activeAdmno = tokenManager.getActiveAdmno().takeIf { tokenManager.hasTokens() },
             )
 
         fun refresh() {
             _state.value = readState()
-        }
-
-        fun canAddAccount(): Boolean = tokenManager.getAccountList().size < AccountState.MAX_ACCOUNTS
-
-        fun switchTo(admno: String): Boolean {
-            val switched = tokenManager.switchTo(admno)
-            if (switched) refresh()
-            return switched
-        }
-
-        fun remove(admno: String) {
-            tokenManager.removeAccount(admno)
-            refresh()
         }
     }

@@ -62,7 +62,6 @@ class AuthRepositoryTest {
             every { tokenManager.setActiveAdmno(any()) } just Runs
             every { tokenManager.saveTokens(any(), any()) } just Runs
             every { tokenManager.saveUserMeta(any(), any()) } just Runs
-            every { tokenManager.addAccount(any(), any(), any()) } just Runs
             coEvery { authApi.validateOtp(any()) } returns
                 LoginResponse(LoginResponseData(token = TokenData(token, "refresh")))
             val body = slot<Map<String, String>>()

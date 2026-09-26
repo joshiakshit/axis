@@ -74,7 +74,7 @@ internal fun TimetableDayPager(
                 isLoaded -> {
                     val day = dayCache[date]
                     if (day == null || day.items.none { it is TimetableItem.Slot }) {
-                        EmptyDaySchedule(date, day?.holiday)
+                        EmptyDaySchedule(date)
                     } else {
                         DaySlotList(day = day)
                     }
@@ -115,27 +115,20 @@ private fun RetryDaySchedule(onRetry: () -> Unit) {
 }
 
 @Composable
-private fun EmptyDaySchedule(
-    date: LocalDate,
-    holiday: String? = null,
-) {
+private fun EmptyDaySchedule(date: LocalDate) {
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                if (holiday != null) "Holiday" else "No classes",
+                "No classes",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                if (holiday != null) {
-                    "$holiday · ${date.format(emptyDayFormatter)}"
-                } else {
-                    "${date.format(emptyDayFormatter)} · free day"
-                },
+                "${date.format(emptyDayFormatter)} · free day",
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -151,11 +144,6 @@ private fun DaySlotList(day: TimetableDay) {
         verticalArrangement = Arrangement.spacedBy(AppDimens.listItemSpacing),
     ) {
         item(contentType = "spacer") { Spacer(Modifier.height(4.dp)) }
-        if (day.holiday != null) {
-            item(contentType = "holiday_banner") {
-                HolidayBanner(day.holiday)
-            }
-        }
         itemsIndexed(
             day.items,
             key = { index, item ->
@@ -211,22 +199,5 @@ private fun BreakRow(breakItem: TimetableItem.Break) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-    }
-}
-
-@Composable
-private fun HolidayBanner(name: String) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = AppShapes.medium,
-        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f),
-    ) {
-        Text(
-            "Holiday · $name",
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.tertiary,
-        )
     }
 }

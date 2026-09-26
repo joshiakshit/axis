@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,20 +29,13 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.ash.axis.domain.model.SemesterOption
 import com.ash.core.ui.components.SubtleDivider
-import com.ash.core.ui.theme.AppShapes
-import com.ash.core.ui.theme.cardColor
 
 @Suppress("LongMethod", "LongParameterList")
 @Composable
 internal fun AttendanceSettings(
     threshold: Int,
     onThresholdChange: (Int) -> Unit,
-    selectedSemester: SemesterOption?,
-    semesterOptions: List<SemesterOption>,
-    semesterError: String?,
-    onSemesterChange: (SemesterOption) -> Unit,
     semesterEndDate: String,
     onSemesterEndDateChange: (String) -> Unit,
     combinedAttendance: Boolean,
@@ -82,15 +74,6 @@ internal fun AttendanceSettings(
 
         SubtleDivider(modifier = Modifier.padding(vertical = 12.dp))
 
-        SemesterPickerRow(
-            selectedSemester = selectedSemester,
-            semesterOptions = semesterOptions,
-            semesterError = semesterError,
-            onSemesterChange = onSemesterChange,
-        )
-
-        SubtleDivider(modifier = Modifier.padding(vertical = 12.dp))
-
         SemesterEndDateRow(semesterEndDate, onSemesterEndDateChange)
 
         SubtleDivider(modifier = Modifier.padding(vertical = 12.dp))
@@ -114,86 +97,6 @@ internal fun AttendanceSettings(
                 modifier = Modifier.scale(0.8f),
             )
         }
-    }
-}
-
-@Suppress("LongMethod")
-@Composable
-private fun SemesterPickerRow(
-    selectedSemester: SemesterOption?,
-    semesterOptions: List<SemesterOption>,
-    semesterError: String?,
-    onSemesterChange: (SemesterOption) -> Unit,
-) {
-    var showPicker by remember { mutableStateOf(false) }
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text("Semester", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            Text(
-                semesterError ?: selectedSemester?.label ?: "Latest semester",
-                fontSize = 12.sp,
-                color =
-                    if (semesterError == null) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    } else {
-                        MaterialTheme.colorScheme.error
-                    },
-            )
-        }
-        TextButton(
-            onClick = { showPicker = true },
-            enabled = semesterOptions.isNotEmpty(),
-        ) {
-            Text("Change")
-        }
-    }
-
-    if (showPicker) {
-        AlertDialog(
-            onDismissRequest = { showPicker = false },
-            confirmButton = {},
-            title = { Text("Semester") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    semesterOptions.forEach { option ->
-                        val selected =
-                            selectedSemester?.yearId == option.yearId &&
-                                selectedSemester.classId == option.classId
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = AppShapes.small,
-                            color =
-                                if (selected) {
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-                                } else {
-                                    cardColor()
-                                },
-                            onClick = {
-                                onSemesterChange(option)
-                                showPicker = false
-                            },
-                        ) {
-                            Text(
-                                option.label,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                fontSize = 13.sp,
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                color =
-                                    if (selected) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurface
-                                    },
-                            )
-                        }
-                    }
-                }
-            },
-        )
     }
 }
 

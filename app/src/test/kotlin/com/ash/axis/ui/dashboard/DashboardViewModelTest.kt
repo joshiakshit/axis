@@ -66,7 +66,7 @@ class DashboardViewModelTest {
                 every { auth.getUserInfo() } returns UserInfo("A", 1, "Alex", "", "", "Client")
                 every { preferences.getUserInt("attendance_threshold", 75) } returns threshold
                 every { network.isOnline } returns flowOf(true)
-                coEvery { attendance.getPreferredSemester(any(), any(), any(), any(), any()) } coAnswers { pending.await() }
+                coEvery { attendance.getLatestSemester(any(), any(), any()) } coAnswers { pending.await() }
                 coEvery { attendance.observeSummary(any()) } coAnswers {
                     val key = firstArg<AttendanceKey>()
                     when {

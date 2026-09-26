@@ -4,7 +4,6 @@ import android.os.Build
 import android.util.Log
 import com.ash.axis.BuildConfig
 import com.ash.axis.data.api.AxisBackendApi
-import com.ash.axis.data.device.DeviceIdProvider
 import com.ash.core.security.TokenManager
 import com.ash.core.storage.PreferencesStore
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,7 +30,6 @@ class AxisSessionRepository
     constructor(
         private val api: AxisBackendApi?,
         private val tokenManager: TokenManager,
-        private val deviceIdProvider: DeviceIdProvider,
         private val preferencesStore: PreferencesStore,
         private val json: Json,
     ) {
@@ -77,7 +75,6 @@ class AxisSessionRepository
                 appVersionCode = BuildConfig.VERSION_CODE,
                 deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}".trim(),
                 androidSdk = Build.VERSION.SDK_INT,
-                deviceId = deviceIdProvider.get(),
             )
 
         @Suppress("TooGenericExceptionCaught")
