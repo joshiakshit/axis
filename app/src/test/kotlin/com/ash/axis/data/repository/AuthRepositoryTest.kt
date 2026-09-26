@@ -40,7 +40,7 @@ class AuthRepositoryTest {
     private val repository = AuthRepository(authApi, userApi, tokenManager, deviceIdProvider, remoteConfig, json)
 
     @Test
-    fun `otp requests use the configured app version`() =
+    fun `otp requests use phone method and the configured app version`() =
         runTest {
             every { deviceIdProvider.get() } returns "device"
             every { remoteConfig.appVersion() } returns "3.0.9"
@@ -50,6 +50,8 @@ class AuthRepositoryTest {
             repository.requestOtp("9999999999")
 
             coVerify { authApi.requestOtp(capture(body)) }
+            assertEquals("phone", body.captured["method"])
+            assertEquals("9999999999", body.captured["contact"])
             assertEquals("3.0.9", body.captured["appversion"])
         }
 

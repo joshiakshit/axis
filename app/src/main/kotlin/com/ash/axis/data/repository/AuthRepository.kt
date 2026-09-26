@@ -16,11 +16,6 @@ import java.util.Base64
 import javax.inject.Inject
 import javax.inject.Singleton
 
-enum class LoginMethod(val apiValue: String) {
-    PHONE("phone"),
-    EMAIL("email"),
-}
-
 @Singleton
 class AuthRepository
     @Inject
@@ -35,25 +30,20 @@ class AuthRepository
         private val refreshMutex = Mutex()
         private val profileMutex = Mutex()
 
-        suspend fun requestOtp(
-            contact: String,
-            method: LoginMethod = LoginMethod.PHONE,
-        ): String {
+        suspend fun requestOtp(phone: String): String {
             val deviceId = getOrCreateDeviceId()
             val response =
                 authApi.requestOtp(
                     mapOf(
-                        "method" to method.apiValue,
-                        "contact" to contact,
-                        "lastmodifiedby" to contact,
+                        "method" to "phone",
+                        "contact" to phone,
+                        "lastmodifiedby" to phone,
                         "deviceid" to deviceId,
                         "appversion" to remoteConfig.appVersion(),
                     ),
                 )
-            return response.data?.username ?: contact
+            return response.data?.username ?: phone
         }
-
-        suspend fun requestOtp(phone: String): String = requestOtp(phone, LoginMethod.PHONE)
 
         suspend fun validateOtp(
             contact: String,
