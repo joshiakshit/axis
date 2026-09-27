@@ -19,7 +19,6 @@ data class CachePolicy(
     }
 
     companion object {
-        val DASHBOARD = CachePolicy(Duration.ofMinutes(30))
         val ATTENDANCE = CachePolicy(Duration.ofHours(24))
         val TIMETABLE = CachePolicy(Duration.ofHours(1))
         val DAYWISE = CachePolicy(Duration.ofHours(24))
@@ -30,6 +29,4 @@ data class CachedResult<T>(
     val data: T,
     val freshness: CacheFreshness,
     val cachedAtMillis: Long,
-) {
-    val isStale: Boolean = freshness != CacheFreshness.FRESH
-}
+)

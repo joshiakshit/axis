@@ -7,6 +7,7 @@ import com.ash.axis.data.db.CacheDao
 import com.ash.axis.data.db.JsonCache
 import com.ash.axis.domain.model.StudentRequestContext
 import com.ash.axis.domain.model.TimetableSlot
+import com.ash.core.storage.CacheFreshness
 import com.ash.core.storage.CachePolicy
 import com.ash.core.storage.CachedResult
 import kotlinx.coroutines.CancellationException
@@ -17,6 +18,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -24,6 +28,8 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import java.time.LocalDate
+import java.time.format.TextStyle
+import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -33,14 +39,14 @@ class TimetableRepository
     @Inject
     constructor(
         private val api: ICloudEmsApi,
-        cacheDao: CacheDao,
+        private val cacheDao: CacheDao,
         private val authRepository: AuthRepository,
         json: Json,
     ) {
-        private val cacheStore = TimetableCacheStore(cacheDao, json)
         private val studentApi = StudentApiParser(json)
         private val normalizer = TimetableNormalizer(json)
         private val typedCache = JsonCache(cacheDao, json)
+        private val mapSerializer = MapSerializer(String.serializer(), ListSerializer(TimetableSlot.serializer()))
         private val routeMutex = Mutex()
         private val routes = mutableMapOf<StudentRequestContext, TimetableRoute>()
         private val timetable =
@@ -48,9 +54,7 @@ class TimetableRepository
                 CoroutineScope(SupervisorJob() + Dispatchers.IO),
                 { key: TimetableKey ->
                     typedCache.read(key.cacheKey, TimetableData.serializer(), CachePolicy.TIMETABLE)
-                        ?: peekTimetable(key.context, key.startDate, key.endDate)?.let {
-                            CachedResult(TimetableData(it.data, null), com.ash.core.storage.CacheFreshness.STALE, it.cachedAtMillis)
-                        }
+                        ?: readLegacyWeek(key)
                 },
                 { key ->
                     requireActiveAccount(key.context)
@@ -98,80 +102,32 @@ class TimetableRepository
             }
         }
 
-        private fun timetableKey(
-            context: StudentRequestContext,
-            route: TimetableRoute,
-            startDate: String,
-            endDate: String,
-            dated: Boolean = false,
-        ): String {
-            val kind = if (dated) "dated" else "weekly"
-            return "v3_timetable_${kind}_${context.admno}_${context.brId}_${context.clientId}_" +
-                "${context.academicYear}_${route.name.lowercase()}_${startDate}_$endDate"
-        }
-
-        suspend fun peekTimetable(
-            context: StudentRequestContext,
-            startDate: String,
-            endDate: String,
-        ): CachedResult<Map<String, List<TimetableSlot>>>? {
-            return TimetableRoute.entries
-                .mapNotNull { route -> cacheStore.peek(timetableKey(context, route, startDate, endDate)) }
-                .maxByOrNull { it.cachedAtMillis }
-        }
-
-        suspend fun getTimetable(
-            context: StudentRequestContext,
-            startDate: String,
-            endDate: String,
-            forceRefresh: Boolean = false,
-        ): Map<String, List<TimetableSlot>> {
-            if (forceRefresh) clearRoute(context)
-            val route = resolveRoute(context)
-            val cacheKey = timetableKey(context, route, startDate, endDate)
-            if (!forceRefresh) {
-                cacheStore.cached(cacheKey, CachePolicy.TIMETABLE)?.let { return it }
-            }
-
-            return try {
-                val result = fetchTimetableResponse(context, route, startDate, endDate)
-                val timetable = normalizer.normalizeTimetable(result)
-                cacheStore.store(cacheKey, timetable)
-                timetable
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                cacheStore.cachedAnyAge(cacheKey) ?: throw e
-            }
-        }
-
-        suspend fun getDateKeyedTimetable(
-            context: StudentRequestContext,
-            startDate: String,
-            endDate: String,
-            forceRefresh: Boolean = false,
-        ): Map<LocalDate, List<TimetableSlot>> {
-            if (forceRefresh) clearRoute(context)
-            val route = resolveRoute(context)
-            val cacheKey = timetableKey(context, route, startDate, endDate, dated = true)
-            if (!forceRefresh) {
-                cacheStore.cachedDateKeyed(cacheKey, CachePolicy.TIMETABLE)?.let { return it }
-            }
-
-            return try {
-                val result = fetchTimetableResponse(context, route, startDate, endDate)
-                val timetable = normalizer.normalizeDateKeyed(result, LocalDate.parse(startDate), LocalDate.parse(endDate))
-                cacheStore.storeDateKeyed(cacheKey, timetable)
-                timetable
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                cacheStore.cachedDateKeyedAnyAge(cacheKey) ?: throw e
-            }
-        }
+        private suspend fun readLegacyWeek(key: TimetableKey): CachedResult<TimetableData>? =
+            listOf("weekly", "dated").flatMap { kind ->
+                TimetableRoute.entries.mapNotNull { route ->
+                    val context = key.context
+                    val cacheKey =
+                        "v3_timetable_${kind}_${context.admno}_${context.brId}_${context.clientId}_" +
+                            "${context.academicYear}_${route.name.lowercase()}_${key.startDate}_${key.endDate}"
+                    val cached = typedCache.read(cacheKey, mapSerializer, CachePolicy.TIMETABLE) ?: return@mapNotNull null
+                    val data =
+                        if (kind == "dated") {
+                            val weekly =
+                                runCatching {
+                                    cached.data.mapKeys {
+                                        LocalDate.parse(it.key).dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ENGLISH)
+                                    }
+                                }.getOrNull() ?: return@mapNotNull null
+                            TimetableData(weekly, cached.data)
+                        } else {
+                            TimetableData(cached.data, null)
+                        }
+                    CachedResult(data, CacheFreshness.STALE, cached.cachedAtMillis)
+                }
+            }.maxByOrNull { it.cachedAtMillis }
 
         suspend fun clearCache() {
-            timetable.clearCache { cacheStore.clear() }
+            timetable.clearCache { cacheDao.clearAll() }
             routeMutex.withLock { routes.clear() }
         }
 

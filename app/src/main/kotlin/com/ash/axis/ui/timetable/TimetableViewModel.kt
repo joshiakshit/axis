@@ -39,7 +39,6 @@ data class DisplaySlot(
     val displayName: String,
     val progress: Float?,
     val isSubstitution: Boolean = false,
-    val originalTeacher: String? = null,
     val substituteTeacher: String? = null,
     val teacherName: String? = null,
 )
@@ -261,7 +260,6 @@ class TimetableViewModel
                             displayName = timetableUseCase.displaySubjectName(slot),
                             progress = timetableUseCase.currentSlotProgress(slot, isToday),
                             isSubstitution = isSub,
-                            originalTeacher = if (isSub) timetableUseCase.originalTeacher(slot) else null,
                             substituteTeacher = if (isSub) timetableUseCase.substituteTeacher(slot) else null,
                             teacherName = timetableUseCase.originalTeacher(slot),
                         ),

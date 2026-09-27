@@ -16,7 +16,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -75,7 +74,7 @@ class TimetableRepositoryTest {
 
     @Test
     fun `legacy requests keep the exact student context`() =
-        runTest {
+        runBlocking {
             stubCache()
             val featureBody = slot<RequestBody>()
             val scheduleBody = slot<RequestBody>()
@@ -83,7 +82,7 @@ class TimetableRepositoryTest {
                 success("""{"status":false,"enble_batch_wise_course_flow":"1"}""")
             coEvery { api.postTimetable(capture(scheduleBody)) } returns emptySchedule()
 
-            repository.getTimetable(context, "2026-09-07", "2026-09-13", forceRefresh = true)
+            loadWeek(force = true)
 
             val feature = featureBody.captured.asJsonObject()
             assertEquals("getbatchwisebranchwiseflow", feature.string("method"))
@@ -102,7 +101,7 @@ class TimetableRepositoryTest {
 
     @Test
     fun `confirmed v1 uses only v1 and stores an isolated key`() =
-        runTest {
+        runBlocking {
             val stored = slot<CacheEntity>()
             stubCache(stored)
             val bodies = mutableListOf<RequestBody>()
@@ -112,32 +111,32 @@ class TimetableRepositoryTest {
                     emptySchedule(),
                 )
 
-            repository.getTimetable(context, "2026-09-07", "2026-09-13", forceRefresh = true)
+            loadWeek(force = true)
 
             assertEquals("getbatchwisebranchwiseflow", bodies[0].asJsonObject().string("method"))
             assertEquals("getData", bodies[1].asJsonObject().string("method"))
             coVerify(exactly = 0) { api.postTimetable(any()) }
             assertEquals(
-                "v3_timetable_weekly_21001_11_clientMixedCase_2026-2027_v1_2026-09-07_2026-09-13",
+                "v4_timetable_21001_11_clientMixedCase_2026-2027_2026-09-07_2026-09-13",
                 stored.captured.key,
             )
         }
 
     @Test
     fun `feature check failure uses legacy`() =
-        runTest {
+        runBlocking {
             stubCache()
             coEvery { api.postTimetableV1(any()) } returns errorResponse()
             coEvery { api.postTimetable(any()) } returns emptySchedule()
 
-            repository.getTimetable(context, "2026-09-07", "2026-09-13", forceRefresh = true)
+            loadWeek(force = true)
 
             coVerify(exactly = 1) { api.postTimetable(any()) }
         }
 
     @Test
     fun `confirmed v1 schedule failure does not retry legacy`() =
-        runTest {
+        runBlocking {
             stubCache()
             coEvery { api.postTimetableV1(any()) } returnsMany
                 listOf(
@@ -147,7 +146,7 @@ class TimetableRepositoryTest {
 
             val result =
                 runCatching {
-                    repository.getTimetable(context, "2026-09-07", "2026-09-13", forceRefresh = true)
+                    loadWeek(force = true)
                 }
 
             assertTrue(result.exceptionOrNull() is IcloudServerException)
@@ -156,16 +155,16 @@ class TimetableRepositoryTest {
 
     @Test
     fun `cancelled schedule does not become cached success`() =
-        runTest {
+        runBlocking {
             stubCache()
             coEvery { api.postTimetableV1(any()) } returns success("""{"status":false}""")
             coEvery { api.postTimetable(any()) } throws CancellationException("cancelled")
-            coEvery { cacheDao.get(match { it.startsWith("v3_timetable_weekly") }) } returns
+            coEvery { cacheDao.get(match { it.startsWith("v3_timetable_dated") }) } returns
                 CacheEntity("saved", "{\"Mon\":[]}")
 
             val failure =
                 runCatching {
-                    repository.getTimetable(context, "2026-09-07", "2026-09-13", forceRefresh = true)
+                    loadWeek(force = true)
                 }.exceptionOrNull()
 
             assertTrue(failure is CancellationException)
@@ -189,6 +188,42 @@ class TimetableRepositoryTest {
             assertEquals("CS1", data.dated?.getValue("2026-09-07")?.single()?.subjectId)
             coVerify(exactly = 1) { api.postTimetable(any()) }
         }
+
+    @Test
+    fun `dated export reuses a fresh saved week without fetching the schedule`() =
+        runBlocking {
+            stubCache()
+            coEvery { api.postTimetableV1(any()) } returns success("""{"status":false}""")
+            coEvery { cacheDao.get(match { it.startsWith("v4_timetable_") }) } returns
+                CacheEntity("saved", """{"weekly":{},"dated":{"2026-09-07":[{"subject_id":"CS1"}]}}""")
+
+            val result = loadWeek()
+
+            assertEquals("CS1", result.dated!!.getValue("2026-09-07").single().subjectId)
+            coVerify(exactly = 0) { api.postTimetable(any()) }
+        }
+
+    @Test
+    fun `dated export keeps expired saved data when the schedule request fails`() =
+        runBlocking {
+            stubCache()
+            coEvery { api.postTimetableV1(any()) } returns success("""{"status":false}""")
+            coEvery { api.postTimetable(any()) } returns errorResponse()
+            coEvery { cacheDao.get(match { it.startsWith("v3_timetable_dated") }) } returns
+                CacheEntity("saved", """{"2026-09-07":[{"subject_id":"CS1"}]}""", 123L)
+
+            val result = loadWeek()
+
+            assertEquals("CS1", result.dated!!.getValue("2026-09-07").single().subjectId)
+            coVerify(exactly = 1) { api.postTimetable(any()) }
+            coVerify(exactly = 0) { cacheDao.put(any()) }
+        }
+
+    private suspend fun loadWeek(force: Boolean = false): TimetableData {
+        val state = repository.requestWeek(TimetableKey(context, "2026-09-07", "2026-09-13"), force)
+        val snapshot = withTimeout(5_000) { state.first { !it.refreshing } }
+        return snapshot.data ?: throw (snapshot.error ?: CancellationException("No data"))
+    }
 
     private fun stubCache(stored: io.mockk.CapturingSlot<CacheEntity>? = null) {
         coEvery { authRepository.refreshTokenIfNeeded() } returns "access"

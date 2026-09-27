@@ -6,9 +6,6 @@ import com.ash.axis.data.db.CacheDao
 import com.ash.axis.data.db.CacheEntity
 import com.ash.axis.domain.model.StudentRequestContext
 import com.ash.axis.domain.model.UserInfo
-import com.ash.axis.ui.qr.QrDiagnostics
-import com.ash.axis.ui.qr.QrScanMode
-import com.ash.axis.ui.qr.QrStage
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -80,8 +77,8 @@ class AttendanceRepositoryTest {
         }
 
     @Test
-    fun `legacy summary load keeps saved data after network failure`() =
-        runTest {
+    fun `shared summary keeps saved data after network failure`() =
+        runBlocking {
             val api = mockk<ICloudEmsApi>()
             val cacheDao = mockk<CacheDao>()
             val authRepository = mockk<AuthRepository>()
@@ -90,7 +87,10 @@ class AttendanceRepositoryTest {
             coEvery { api.postAttendance(any()) } throws IllegalStateException("offline")
             val repository = AttendanceRepository(api, mockk<QrAttendanceApi>(), cacheDao, authRepository, Json)
 
-            val result = repository.getAttendance("21001", 11, "C1", "2025-2026", forceRefresh = true)
+            every { authRepository.getUserInfo() } returns UserInfo("21001", 11, "", "", "", "Client")
+            val key = AttendanceKey(StudentRequestContext("21001", 11, "Client", "2026"), "C1", "2025-2026")
+            val state = repository.requestSummary(key, force = true)
+            val result = withTimeout(5_000) { state.first { !it.refreshing }.data!! }
 
             assertEquals(emptyMap<String, Any>(), result.table)
             coVerify(exactly = 0) { cacheDao.put(any()) }
@@ -174,13 +174,9 @@ class AttendanceRepositoryTest {
             val qrApi = mockk<QrAttendanceApi>()
             val authRepository = mockk<AuthRepository>()
             val body = slot<RequestBody>()
-            var submissionStarted = false
             coEvery { authRepository.refreshTokenIfNeeded() } returns "token"
             every { authRepository.getUserInfo() } returns UserInfo("21001", 1, "Student", "", "", "clientMixedCase")
-            coEvery { qrApi.sendScanQR(capture(body)) } answers {
-                assertTrue(submissionStarted)
-                Response.success("{}".toResponseBody())
-            }
+            coEvery { qrApi.sendScanQR(capture(body)) } returns Response.success("{}".toResponseBody())
             val repository = AttendanceRepository(api, qrApi, mockk<CacheDao>(), authRepository, Json)
 
             val result =
@@ -192,15 +188,13 @@ class AttendanceRepositoryTest {
                     latitude = null,
                     longitude = null,
                     clientId = "clientMixedCase",
-                    onSubmissionStart = { submissionStarted = true },
                 )
 
             val buffer = Buffer()
             body.captured.writeTo(buffer)
             val payload = Json.parseToJsonElement(buffer.readUtf8()).jsonObject
             assertEquals("clientMixedCase", payload.getValue("collegeid").jsonPrimitive.content)
-            assertEquals(200, result.httpStatus)
-            assertTrue(result.httpDurationMs != null && result.httpDurationMs >= 0)
+            assertTrue(result.success)
         }
 
     @Test
@@ -210,10 +204,6 @@ class AttendanceRepositoryTest {
             val authRepository = mockk<AuthRepository>()
             coEvery { authRepository.refreshTokenIfNeeded() } throws SessionExpiredException()
             val repository = AttendanceRepository(mockk<ICloudEmsApi>(), qrApi, mockk<CacheDao>(), authRepository, Json)
-            val lines = mutableListOf<String>()
-            val diagnostics = QrDiagnostics(enabled = true, logger = lines::add)
-            diagnostics.start(QrScanMode.ATTENDANCE)
-            diagnostics.stage(QrStage.AUTHENTICATION)
 
             val failure =
                 runCatching {
@@ -224,13 +214,10 @@ class AttendanceRepositoryTest {
                         brId = 1,
                         latitude = null,
                         longitude = null,
-                        onSubmissionStart = { diagnostics.stage(QrStage.SUBMISSION) },
                     )
                 }.exceptionOrNull()
 
             assertTrue(failure is SessionExpiredException)
-            assertEquals(QrStage.AUTHENTICATION, diagnostics.state.value.stage)
-            assertTrue(lines.none { it.contains("stage=submission") })
             coVerify(exactly = 0) { qrApi.sendScanQR(any()) }
         }
 

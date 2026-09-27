@@ -27,6 +27,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -41,7 +42,6 @@ class AttendanceRepository
         private val authRepository: AuthRepository,
         private val json: Json,
     ) {
-        private val cacheStore = AttendanceCacheStore(cacheDao, json)
         private val studentApi = StudentApiParser(json)
         private val qrResultParser = QrScanResultParser(json)
         private val acadYearListSerializer = ListSerializer(AcadYear.serializer())
@@ -183,38 +183,30 @@ class AttendanceRepository
             val account = requireMetadataAccount(admno, brId)
             val cacheKey = "v3_acad_years_${admno}_${brId}_${account.clientId}"
             if (!forceRefresh) {
-                cacheStore.cached(cacheKey, CachePolicy.ATTENDANCE, acadYearListSerializer)?.let { return it }
+                typedCache.readAccepted(cacheKey, acadYearListSerializer, CachePolicy.ATTENDANCE)?.data?.let { return it }
             }
 
             return try {
-                authRepository.refreshTokenIfNeeded()
                 val result =
-                    studentApi.parseStudentResponse(
-                        studentApi.requireBody(
-                            endpoint = "getAcadYears",
-                            response =
-                                api.postAttendance(
-                                    studentApi.jsonBody(
-                                        "from" to "app",
-                                        "method" to "getAcadYear",
-                                        "admno" to admno,
-                                        "br_id" to brId,
-                                        "client" to account.clientId,
-                                    ),
-                                ),
-                        ),
+                    attendanceResponse(
+                        "getAcadYears",
+                        "from" to "app",
+                        "method" to "getAcadYear",
+                        "admno" to admno,
+                        "br_id" to brId,
+                        "client" to account.clientId,
                     )
 
                 val yearsJson = result.arrayOrObjectValue("AcadYears", "acadYears", "acad_years", "data")
                 val years = json.decodeFromJsonElement(acadYearListSerializer, yearsJson)
                 requireMetadataAccount(admno, brId)
-                cacheStore.store(cacheKey, years, acadYearListSerializer)
+                typedCache.write(cacheKey, years, acadYearListSerializer)
                 years
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 requireMetadataAccount(admno, brId)
-                cacheStore.cachedAnyAge(cacheKey, acadYearListSerializer)
+                typedCache.read(cacheKey, acadYearListSerializer, CachePolicy.ATTENDANCE)?.data
                     ?: throw e
             }
         }
@@ -228,42 +220,44 @@ class AttendanceRepository
             val account = requireMetadataAccount(admno, brId)
             val cacheKey = "v3_classes_${admno}_${brId}_${account.clientId}_$year"
             if (!forceRefresh) {
-                cacheStore.cached(cacheKey, CachePolicy.ATTENDANCE, classInfoListSerializer)?.let { return it }
+                typedCache.readAccepted(cacheKey, classInfoListSerializer, CachePolicy.ATTENDANCE)?.data?.let { return it }
             }
 
             return try {
-                authRepository.refreshTokenIfNeeded()
                 val result =
-                    studentApi.parseStudentResponse(
-                        studentApi.requireBody(
-                            endpoint = "getClasses",
-                            response =
-                                api.postAttendance(
-                                    studentApi.jsonBody(
-                                        "from" to "app",
-                                        "method" to "getclasses",
-                                        "admno" to admno,
-                                        "br_id" to brId,
-                                        "client" to account.clientId,
-                                        "year" to year,
-                                        "curyear" to year,
-                                    ),
-                                ),
-                        ),
+                    attendanceResponse(
+                        "getClasses",
+                        "from" to "app",
+                        "method" to "getclasses",
+                        "admno" to admno,
+                        "br_id" to brId,
+                        "client" to account.clientId,
+                        "year" to year,
+                        "curyear" to year,
                     )
 
                 val classesJson = result.arrayOrObjectValue("classes", "Classes", "class", "data")
                 val classes = json.decodeFromJsonElement(classInfoListSerializer, classesJson)
                 requireMetadataAccount(admno, brId)
-                cacheStore.store(cacheKey, classes, classInfoListSerializer)
+                typedCache.write(cacheKey, classes, classInfoListSerializer)
                 classes
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 requireMetadataAccount(admno, brId)
-                cacheStore.cachedAnyAge(cacheKey, classInfoListSerializer)
+                typedCache.read(cacheKey, classInfoListSerializer, CachePolicy.ATTENDANCE)?.data
                     ?: throw e
             }
+        }
+
+        private suspend fun attendanceResponse(
+            endpoint: String,
+            vararg fields: Pair<String, Any>,
+        ): JsonElement {
+            authRepository.refreshTokenIfNeeded()
+            return studentApi.parseStudentResponse(
+                studentApi.requireBody(endpoint, api.postAttendance(studentApi.jsonBody(*fields))),
+            )
         }
 
         private fun requireMetadataAccount(
@@ -272,30 +266,6 @@ class AttendanceRepository
         ) = authRepository.getUserInfo()?.takeIf { it.admno == admno && it.brId == brId && it.clientId.isNotBlank() }
             ?: error("Academic request account changed")
 
-        suspend fun getAttendance(
-            admno: String,
-            brId: Int,
-            classId: String,
-            year: String,
-            forceRefresh: Boolean = false,
-        ): AttendanceResponse {
-            val cacheKey = "v2_attendance_${admno}_${classId}_$year"
-            if (!forceRefresh) {
-                cacheStore.cached(cacheKey, CachePolicy.ATTENDANCE, AttendanceResponse.serializer())?.let { return it }
-            }
-
-            return try {
-                val attendance = fetchAttendance(admno, brId, classId, year)
-                cacheStore.store(cacheKey, attendance, AttendanceResponse.serializer())
-                attendance
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                cacheStore.cachedAnyAge(cacheKey, AttendanceResponse.serializer())
-                    ?: throw e
-            }
-        }
-
         private suspend fun fetchAttendance(
             admno: String,
             brId: Int,
@@ -303,25 +273,17 @@ class AttendanceRepository
             year: String,
             clientId: String = Tenants.GU.clientCode,
         ): AttendanceResponse {
-            authRepository.refreshTokenIfNeeded()
             val result =
-                studentApi.parseStudentResponse(
-                    studentApi.requireBody(
-                        endpoint = "getAttendance",
-                        response =
-                            api.postAttendance(
-                                studentApi.jsonBody(
-                                    "from" to "app",
-                                    "method" to "GetCourseWiseReport",
-                                    "admno" to admno,
-                                    "client" to clientId,
-                                    "branch_id" to brId,
-                                    "year" to year,
-                                    "curyear" to year,
-                                    "classid" to classId,
-                                ),
-                            ),
-                    ),
+                attendanceResponse(
+                    "getAttendance",
+                    "from" to "app",
+                    "method" to "GetCourseWiseReport",
+                    "admno" to admno,
+                    "client" to clientId,
+                    "branch_id" to brId,
+                    "year" to year,
+                    "curyear" to year,
+                    "classid" to classId,
                 )
             return json.decodeFromJsonElement(
                 AttendanceResponse.serializer(),
@@ -337,24 +299,17 @@ class AttendanceRepository
             toDate: String,
             clientId: String = Tenants.GU.clientCode,
         ): DaywiseResponse {
-            authRepository.refreshTokenIfNeeded()
             val result =
-                studentApi.parseStudentResponse(
-                    studentApi.requireBody(
-                        "getDaywiseAttendance",
-                        api.postAttendance(
-                            studentApi.jsonBody(
-                                "from" to "app",
-                                "method" to "GetDailyReport",
-                                "admno" to admno,
-                                "client" to clientId,
-                                "branch_id" to brId,
-                                "year" to year,
-                                "from_date" to fromDate,
-                                "to_date" to toDate,
-                            ),
-                        ),
-                    ),
+                attendanceResponse(
+                    "getDaywiseAttendance",
+                    "from" to "app",
+                    "method" to "GetDailyReport",
+                    "admno" to admno,
+                    "client" to clientId,
+                    "branch_id" to brId,
+                    "year" to year,
+                    "from_date" to fromDate,
+                    "to_date" to toDate,
                 )
             return json.decodeFromJsonElement(
                 DaywiseResponse.serializer(),
@@ -388,7 +343,6 @@ class AttendanceRepository
             longitude: Double?,
             userSelfie: String = "",
             clientId: String = "",
-            onSubmissionStart: () -> Unit = {},
         ): QrScanResult {
             val collegeId = clientId.ifBlank { Tenants.GU.id }
             authRepository.refreshTokenIfNeeded()
@@ -408,23 +362,20 @@ class AttendanceRepository
                     "br_id" to brId,
                     "collegeid" to collegeId,
                 )
-            val startedAt = System.nanoTime()
-            onSubmissionStart()
             val response = qrApi.sendScanQR(body)
-            val durationMs = (System.nanoTime() - startedAt) / 1_000_000
             val raw =
                 studentApi.requireBody(
                     endpoint = "sendScanQR",
                     response = response,
                 ).string()
 
-            return qrResultParser.parse(raw, defaultSuccess = true).copy(httpStatus = response.code(), httpDurationMs = durationMs)
+            return qrResultParser.parse(raw, defaultSuccess = true)
         }
 
         suspend fun clearCache() {
             visibleDaywise = null
             daily.clearCache { }
-            summary.clearCache { cacheStore.clear() }
+            summary.clearCache { academicCacheDao.clearAll() }
         }
     }
 

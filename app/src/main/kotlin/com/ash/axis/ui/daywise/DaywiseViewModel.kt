@@ -206,25 +206,11 @@ class DaywiseViewModel
             val error = presentation.selection.error ?: snapshot.error ?: presentation.demandError ?: presentation.manualError
             val message = error?.let(ErrorText::forData)
             val response = snapshot.data
-            if (response == null) {
-                _state.update {
-                    it.copy(
-                        days = persistentListOf(),
-                        hasData = false,
-                        isLoading = error == null,
-                        isRefreshing = snapshot.refreshing,
-                        error = message,
-                        semesterError = presentation.selection.error?.let(ErrorText::forData),
-                        lastUpdated = null,
-                    )
-                }
-                return
-            }
             val days =
-                response.dateArray.entries.mapNotNull { (key, text) ->
+                response?.dateArray.orEmpty().entries.mapNotNull { (key, text) ->
                     val date = runCatching { LocalDate.parse(text, dateFmt) }.getOrNull() ?: return@mapNotNull null
                     val slots =
-                        response.attendanceArray[key]?.values.orEmpty()
+                        response?.attendanceArray?.get(key)?.values.orEmpty()
                             .filter { it.isPresent != null }.sortedBy { it.fromTime }
                     DaywiseDay(
                         date,
@@ -235,13 +221,13 @@ class DaywiseViewModel
                 }.sortedBy { it.date }.toImmutableList()
             _state.update {
                 it.copy(
-                    isLoading = false,
+                    isLoading = response == null && error == null,
                     isRefreshing = snapshot.refreshing,
                     error = message,
                     semesterError = presentation.selection.error?.let(ErrorText::forData),
                     days = days,
-                    lastUpdated = snapshot.updatedAtMillis,
-                    hasData = true,
+                    lastUpdated = snapshot.updatedAtMillis.takeIf { response != null },
+                    hasData = response != null,
                 )
             }
         }

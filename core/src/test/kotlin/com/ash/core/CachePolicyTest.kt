@@ -36,12 +36,6 @@ class CachePolicyTest {
     }
 
     @Test
-    fun `preset DASHBOARD is 30 minutes fresh`() {
-        val justNow = System.currentTimeMillis()
-        assertEquals(CacheFreshness.FRESH, CachePolicy.DASHBOARD.evaluate(justNow))
-    }
-
-    @Test
     fun `preset ATTENDANCE is 24 hours fresh`() {
         val twelveHoursAgo = System.currentTimeMillis() - Duration.ofHours(12).toMillis()
         assertEquals(CacheFreshness.FRESH, CachePolicy.ATTENDANCE.evaluate(twelveHoursAgo))
