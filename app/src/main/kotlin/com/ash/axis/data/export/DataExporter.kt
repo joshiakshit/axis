@@ -5,20 +5,28 @@ import android.content.Context
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import com.ash.axis.data.academic.AcademicSnapshot
+import com.ash.axis.data.repository.AttendanceKey
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
+import com.ash.axis.data.repository.TimetableKey
 import com.ash.axis.data.repository.TimetableRepository
 import com.ash.axis.domain.model.AttendanceResponse
 import com.ash.axis.domain.model.SemesterOption
+import com.ash.axis.domain.model.StudentRequestContext
 import com.ash.axis.domain.model.TimetableSlot
 import com.ash.axis.domain.usecase.TimetableUseCase
 import com.ash.core.storage.PreferencesStore
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import java.io.File
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
+import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -55,7 +63,8 @@ class DataExporter
         private suspend fun loadAttendance(): Attendance {
             val user = authRepository.getUserInfo() ?: error("Not logged in")
             val semester = attendanceRepo.getLatestSemester(user.admno, user.brId)
-            val data = attendanceRepo.getAttendance(user.admno, user.brId, semester.classId, semester.yearId, false)
+            val context = StudentRequestContext(user.admno, user.brId, user.clientId, user.academicYear)
+            val data = attendanceRepo.requestSummary(AttendanceKey(context, semester.classId, semester.yearId)).awaitData(context)
             return Attendance(semester, data)
         }
 
@@ -65,14 +74,22 @@ class DataExporter
                 parseDate(preferencesStore.getUserString(ExportKeys.TIMETABLE_VIEW_DATE, "").first()) ?: LocalDate.now()
             val weekStart = viewDate.with(DayOfWeek.MONDAY)
             val weekEnd = weekStart.plusDays(6)
+            val data = timetableRepo.requestWeek(TimetableKey(context, weekStart.toString(), weekEnd.toString())).awaitData(context)
             val week =
-                timetableRepo.getDateKeyedTimetable(
-                    context = context,
-                    startDate = weekStart.toString(),
-                    endDate = weekEnd.toString(),
-                    forceRefresh = false,
-                )
+                data.dated?.mapKeys { LocalDate.parse(it.key) } ?: (0..6).associate { offset ->
+                    val date = weekStart.plusDays(offset.toLong())
+                    date to data.weekly[date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ENGLISH)].orEmpty()
+                }
             return ViewWeek(week, weekStart, weekEnd)
+        }
+
+        private suspend fun <T> StateFlow<AcademicSnapshot<T>>.awaitData(context: StudentRequestContext): T {
+            val snapshot = first { !it.refreshing }
+            val user = authRepository.getUserInfo()
+            check(user != null && user.admno == context.admno && user.brId == context.brId && user.clientId == context.clientId) {
+                "Export session changed"
+            }
+            return snapshot.data ?: throw (snapshot.error ?: CancellationException("Academic data was reset"))
         }
 
         private fun weekLabel(
@@ -149,7 +166,7 @@ class DataExporter
 
         private fun parseDate(raw: String): LocalDate? = runCatching { LocalDate.parse(raw) }.getOrNull()
 
-        private fun formatPercent(value: Double): String = String.format(java.util.Locale.ENGLISH, "%.2f", value)
+        private fun formatPercent(value: Double): String = String.format(Locale.ENGLISH, "%.2f", value)
 
         private fun lectureLabel(lectType: String): String =
             when {
@@ -160,7 +177,7 @@ class DataExporter
             }
 
         private companion object {
-            val rangeFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("dd MMM", java.util.Locale.ENGLISH)
-            val dayHeadingFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE dd MMM", java.util.Locale.ENGLISH)
+            val rangeFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("dd MMM", Locale.ENGLISH)
+            val dayHeadingFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE dd MMM", Locale.ENGLISH)
         }
     }

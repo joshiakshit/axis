@@ -21,14 +21,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ash.axis.BuildConfig
 import com.ash.axis.ui.update.UpdateButton
+import com.ash.axis.ui.update.UpdateCheck
 import com.ash.axis.ui.update.UpdateViewModel
 
 @Composable
 internal fun UpdateSettings(viewModel: UpdateViewModel = hiltViewModel()) {
     val config by viewModel.config.collectAsStateWithLifecycle()
-    val checking by viewModel.checking.collectAsStateWithLifecycle()
-    val checked by viewModel.checked.collectAsStateWithLifecycle()
-    val error by viewModel.checkError.collectAsStateWithLifecycle()
+    val check by viewModel.check.collectAsStateWithLifecycle()
+    val checking = check == UpdateCheck.CHECKING
     val available = viewModel.available(config)
 
     SettingsCard {
@@ -48,8 +48,10 @@ internal fun UpdateSettings(viewModel: UpdateViewModel = hiltViewModel()) {
             }
             when {
                 checking -> Text("Checking for updates…", style = MaterialTheme.typography.bodySmall)
-                error != null -> Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
-                checked && !available -> Text("You're on the latest version.", color = MaterialTheme.colorScheme.primary)
+                check == UpdateCheck.FAILED ->
+                    Text("Could not check for updates. Try again.", color = MaterialTheme.colorScheme.error)
+                check == UpdateCheck.CHECKED && !available ->
+                    Text("You're on the latest version.", color = MaterialTheme.colorScheme.primary)
             }
             if (available) {
                 UpdateButton(url = config.updateUrl, label = "Update now", modifier = Modifier.fillMaxWidth(), wide = true)

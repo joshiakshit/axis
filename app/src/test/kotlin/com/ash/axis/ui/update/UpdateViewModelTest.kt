@@ -8,6 +8,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -17,10 +18,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
-import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertNotNull
-import org.junit.jupiter.api.Assertions.assertNull
-import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -41,19 +39,47 @@ class UpdateViewModelTest {
                 model.checkForUpdates()
                 model.checkForUpdates()
                 runCurrent()
-                assertTrue(model.checking.value)
+                assertEquals(UpdateCheck.CHECKING, model.check.value)
                 coVerify(exactly = 1) { config.refresh() }
                 pending.complete(false)
                 runCurrent()
-                assertFalse(model.checked.value)
-                assertFalse(model.checking.value)
-                assertNotNull(model.checkError.value)
+                assertEquals(UpdateCheck.FAILED, model.check.value)
                 coEvery { config.refresh() } returns true
                 model.checkForUpdates()
                 runCurrent()
-                assertTrue(model.checked.value)
-                assertNull(model.checkError.value)
+                assertEquals(UpdateCheck.CHECKED, model.check.value)
                 coVerify(exactly = 2) { config.refresh() }
+            } finally {
+                Dispatchers.resetMain()
+            }
+        }
+
+    @Test
+    fun `exceptions and cancellation allow another update check`() =
+        runTest {
+            Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+            try {
+                val installer = mockk<UpdateInstaller>()
+                val config = mockk<RemoteConfigRepository>()
+                every { installer.state } returns MutableStateFlow(UpdateState())
+                every { installer.consumeCompletedVersion() } returns null
+                every { config.state } returns MutableStateFlow(RemoteConfig())
+                val model = UpdateViewModel(installer, config)
+                val failures =
+                    listOf(
+                        IllegalStateException("offline") to UpdateCheck.FAILED,
+                        CancellationException("cancelled") to UpdateCheck.IDLE,
+                    )
+                for ((failure, expected) in failures) {
+                    coEvery { config.refresh() } throws failure
+                    model.checkForUpdates()
+                    runCurrent()
+                    assertEquals(expected, model.check.value)
+                }
+                coEvery { config.refresh() } returns true
+                model.checkForUpdates()
+                runCurrent()
+                assertEquals(UpdateCheck.CHECKED, model.check.value)
             } finally {
                 Dispatchers.resetMain()
             }

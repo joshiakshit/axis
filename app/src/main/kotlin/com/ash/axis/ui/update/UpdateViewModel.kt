@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+enum class UpdateCheck { IDLE, CHECKING, CHECKED, FAILED }
+
 @HiltViewModel
 class UpdateViewModel
     @Inject
@@ -23,12 +25,8 @@ class UpdateViewModel
         val config: StateFlow<RemoteConfig> = remoteConfig.state
         val update: StateFlow<UpdateState> = installer.state
 
-        private val mutableChecking = MutableStateFlow(false)
-        val checking: StateFlow<Boolean> = mutableChecking.asStateFlow()
-        private val mutableChecked = MutableStateFlow(false)
-        val checked: StateFlow<Boolean> = mutableChecked.asStateFlow()
-        private val mutableCheckError = MutableStateFlow<String?>(null)
-        val checkError: StateFlow<String?> = mutableCheckError.asStateFlow()
+        private val mutableCheck = MutableStateFlow(UpdateCheck.IDLE)
+        val check: StateFlow<UpdateCheck> = mutableCheck.asStateFlow()
         private val mutableCompletedVersion = MutableStateFlow(installer.consumeCompletedVersion())
         val completedVersion: StateFlow<String?> = mutableCompletedVersion.asStateFlow()
 
@@ -40,25 +38,20 @@ class UpdateViewModel
 
         @Suppress("TooGenericExceptionCaught")
         fun checkForUpdates() {
-            if (mutableChecking.value) return
-            mutableChecking.value = true
+            if (mutableCheck.value == UpdateCheck.CHECKING) return
+            mutableCheck.value = UpdateCheck.CHECKING
             viewModelScope.launch {
-                mutableCheckError.value = null
-                mutableChecked.value = false
                 try {
-                    mutableChecked.value = remoteConfig.refresh()
-                    if (!mutableChecked.value) mutableCheckError.value = "Could not check for updates. Try again."
+                    mutableCheck.value = if (remoteConfig.refresh()) UpdateCheck.CHECKED else UpdateCheck.FAILED
                 } catch (error: kotlinx.coroutines.CancellationException) {
                     throw error
                 } catch (_: Exception) {
-                    mutableCheckError.value = "Could not check for updates. Try again."
+                    mutableCheck.value = UpdateCheck.FAILED
                 } finally {
-                    mutableChecking.value = false
+                    if (mutableCheck.value == UpdateCheck.CHECKING) mutableCheck.value = UpdateCheck.IDLE
                 }
             }
         }
-
-        fun clearError() = installer.clearError()
 
         fun dismissCompletedUpdate() {
             mutableCompletedVersion.value = null

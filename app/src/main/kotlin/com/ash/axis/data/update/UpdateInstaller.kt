@@ -74,8 +74,6 @@ class UpdateInstaller
             }
         }
 
-        fun clearError() = mutableState.update { it.copy(error = null) }
-
         fun onInstallFailed(cancelled: Boolean) {
             preferences.edit().remove(KEY_UPDATE_FROM).apply()
             val message = if (cancelled) "Installation was cancelled." else "Installation failed. Please try again."

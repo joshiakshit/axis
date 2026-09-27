@@ -28,19 +28,11 @@ import com.ash.core.ui.theme.AppShapes
 
 @Composable
 internal fun SettingsHeader() {
-    Column {
-        Text(
-            "Settings",
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.sp,
-        )
-        Text(
-            "Preferences, data, and app behavior",
-            fontSize = 13.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
+    Text(
+        "Settings",
+        fontSize = 24.sp,
+        fontWeight = FontWeight.Bold,
+    )
 }
 
 @Composable
