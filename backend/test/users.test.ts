@@ -54,15 +54,14 @@ describe("upsertOnSession", () => {
       deviceId: "first-device-id",
     };
     const first = await upsertOnSession(e, claims("21008"), false, false, meta);
-    expect(first).toMatchObject({ session_count: 1, app_version_code: 5, device_id: "first-device-id" });
+    expect(first).toMatchObject({ session_count: 1, app_version_code: 5, device_id: "" });
     const second = await upsertOnSession(e, claims("21008"), false, false, {
       ...meta,
       appVersionCode: 6,
-      deviceId: "second-device-id",
     });
     expect(second.session_count).toBe(2);
     expect(second.app_version_code).toBe(6);
-    expect(second.device_id).toBe("second-device-id");
+    expect(second.device_id).toBe("");
   });
 });
 
@@ -113,8 +112,8 @@ describe("setStatus and listUsers", () => {
 describe("metrics", () => {
   it("bumps and reads aggregate counters", async () => {
     const e = env();
-    await bumpMetrics(e, [{ name: "qr_scan", count: 1 }, { name: "export_pdf", count: 2 }]);
+    await bumpMetrics(e, [{ name: "qr_scan", count: 1 }, { name: "export", count: 2 }]);
     await bumpMetrics(e, [{ name: "qr_scan", count: 3 }]);
-    expect(await getMetrics(e)).toEqual({ qr_scan: 4, export_pdf: 2 });
+    expect(await getMetrics(e)).toEqual({ qr_scan: 4, export: 2 });
   });
 });

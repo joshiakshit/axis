@@ -8,7 +8,6 @@ export interface SessionMeta {
   appVersionCode: number;
   deviceModel: string;
   androidSdk: number;
-  deviceId: string;
 }
 
 export const EMPTY_META: SessionMeta = {
@@ -16,7 +15,6 @@ export const EMPTY_META: SessionMeta = {
   appVersionCode: 0,
   deviceModel: "",
   androidSdk: 0,
-  deviceId: "",
 };
 
 export interface UserRow {
@@ -66,8 +64,8 @@ export async function upsertOnSession(
     const approvedAt = status === "approved" ? now : "";
     await env.DB.prepare(
       "INSERT INTO users (admno, name, email, status, role, created_at, last_seen_at, first_seen_at, approved_at, " +
-        "app_version_name, app_version_code, device_model, android_sdk, device_id, session_count) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+        "app_version_name, app_version_code, device_model, android_sdk, session_count) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
     )
       .bind(
         claims.admno,
@@ -83,7 +81,6 @@ export async function upsertOnSession(
         meta.appVersionCode,
         meta.deviceModel,
         meta.androidSdk,
-        meta.deviceId,
       )
       .run();
     return {
@@ -100,7 +97,7 @@ export async function upsertOnSession(
       app_version_code: meta.appVersionCode,
       device_model: meta.deviceModel,
       android_sdk: meta.androidSdk,
-      device_id: meta.deviceId,
+      device_id: "",
       session_count: 1,
     };
   }
@@ -117,11 +114,10 @@ export async function upsertOnSession(
   const appVersionCode = meta.appVersionCode || existing.app_version_code;
   const deviceModel = meta.deviceModel || existing.device_model;
   const androidSdk = meta.androidSdk || existing.android_sdk;
-  const deviceId = meta.deviceId || existing.device_id;
   const sessionCount = existing.session_count + 1;
   await env.DB.prepare(
     "UPDATE users SET name = ?, email = ?, role = ?, status = ?, last_seen_at = ?, first_seen_at = ?, approved_at = ?, " +
-      "app_version_name = ?, app_version_code = ?, device_model = ?, android_sdk = ?, device_id = ?, " +
+      "app_version_name = ?, app_version_code = ?, device_model = ?, android_sdk = ?, " +
       "session_count = ? WHERE admno = ?",
   )
     .bind(
@@ -136,7 +132,6 @@ export async function upsertOnSession(
       appVersionCode,
       deviceModel,
       androidSdk,
-      deviceId,
       sessionCount,
       claims.admno,
     )
@@ -154,7 +149,6 @@ export async function upsertOnSession(
     app_version_code: appVersionCode,
     device_model: deviceModel,
     android_sdk: androidSdk,
-    device_id: deviceId,
     session_count: sessionCount,
   };
 }

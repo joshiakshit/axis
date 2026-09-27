@@ -81,7 +81,7 @@ async function adminSession(env: Env): Promise<string> {
 }
 
 describe("POST /v1/session", () => {
-  it("approves the owner and persists telemetry", async () => {
+  it("approves the owner and ignores legacy device IDs", async () => {
     const env = makeEnv();
     const res = await worker.fetch(
       req("/v1/session", {
@@ -109,7 +109,7 @@ describe("POST /v1/session", () => {
     const users = ((await list.json()) as {
       users: Array<{ app_version_code: number; device_model: string; device_id: string }>;
     }).users;
-    expect(users[0]).toMatchObject({ app_version_code: 7, device_model: "Pixel 8", device_id: "compatible-device-id" });
+    expect(users[0]).toMatchObject({ app_version_code: 7, device_model: "Pixel 8", device_id: "" });
   });
 
   it("holds a brand-new user as pending with no token", async () => {

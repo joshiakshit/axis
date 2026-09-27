@@ -33,7 +33,7 @@ export class FakeD1 {
       return { first: null, all: [] };
     }
     if (sql.startsWith("INSERT INTO users")) {
-      const [admno, name, email, status, role, createdAt, lastSeen, firstSeen, approvedAt, avn, avc, dm, sdk, deviceId] =
+      const [admno, name, email, status, role, createdAt, lastSeen, firstSeen, approvedAt, avn, avc, dm, sdk] =
         args as unknown[];
       this.rows.set(String(admno), {
         admno: String(admno),
@@ -49,13 +49,13 @@ export class FakeD1 {
         app_version_code: Number(avc),
         device_model: String(dm),
         android_sdk: Number(sdk),
-        device_id: String(deviceId),
+        device_id: "",
         session_count: 1,
       });
       return { first: null, all: [] };
     }
     if (sql.startsWith("UPDATE users SET name")) {
-      const [name, email, role, status, lastSeen, firstSeen, approvedAt, avn, avc, dm, sdk, deviceId, count, admno] =
+      const [name, email, role, status, lastSeen, firstSeen, approvedAt, avn, avc, dm, sdk, count, admno] =
         args as unknown[];
       const row = this.rows.get(String(admno));
       if (row) {
@@ -72,7 +72,6 @@ export class FakeD1 {
           app_version_code: Number(avc),
           device_model: String(dm),
           android_sdk: Number(sdk),
-          device_id: String(deviceId),
           session_count: Number(count),
         });
       }
