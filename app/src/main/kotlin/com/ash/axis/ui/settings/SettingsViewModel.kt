@@ -31,9 +31,6 @@ data class SettingsUiState(
     val admno: String = "",
     val themeMode: ThemeMode = ThemeMode.DARK,
     val accentHex: String = "",
-    val threshold: Int = 75,
-    val semesterEndDate: String = "",
-    val combinedAttendance: Boolean = false,
     val isExporting: Boolean = false,
     val exportMessage: String? = null,
 )
@@ -61,18 +58,12 @@ class SettingsViewModel
                 val user = authRepository.getUserInfo()
                 val themeStr = preferencesStore.getString("theme_mode", ThemeMode.DARK.name).first()
                 val accentHex = preferencesStore.getString("accent_color", "").first()
-                val threshold = preferencesStore.getUserInt("attendance_threshold", 75).first()
-                val semesterEnd = preferencesStore.getUserString("semester_end_date", "").first()
-                val combinedAttendance = preferencesStore.getUserBoolean("combined_attendance").first()
                 _state.update {
                     it.copy(
                         userName = user?.name ?: "",
                         admno = user?.admno ?: "",
                         themeMode = ThemeMode.entries.find { m -> m.name == themeStr } ?: ThemeMode.DARK,
                         accentHex = ColorProfiles.presetHex(accentHex),
-                        threshold = threshold,
-                        semesterEndDate = semesterEnd,
-                        combinedAttendance = combinedAttendance,
                     )
                 }
             }
@@ -159,28 +150,6 @@ class SettingsViewModel
             appContext.startActivity(
                 Intent.createChooser(intent, export.subject).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )
-        }
-
-        fun setThreshold(value: Int) {
-            viewModelScope.launch {
-                val clamped = value.coerceIn(50, 95)
-                preferencesStore.putUserInt("attendance_threshold", clamped)
-                _state.update { it.copy(threshold = clamped) }
-            }
-        }
-
-        fun setSemesterEndDate(date: String) {
-            viewModelScope.launch {
-                preferencesStore.putUserString("semester_end_date", date)
-                _state.update { it.copy(semesterEndDate = date) }
-            }
-        }
-
-        fun setCombinedAttendance(enabled: Boolean) {
-            viewModelScope.launch {
-                preferencesStore.putUserBoolean("combined_attendance", enabled)
-                _state.update { it.copy(combinedAttendance = enabled) }
-            }
         }
 
         fun logout(onLoggedOut: () -> Unit) {

@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ash.axis.data.academic.AcademicDataCoordinator
 import com.ash.axis.data.academic.AcademicSnapshot
+import com.ash.axis.data.academic.attendanceKey
+import com.ash.axis.data.academic.attendanceSelection
 import com.ash.axis.data.repository.AttendanceKey
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.StudentMarkerRepository
@@ -16,6 +18,7 @@ import com.ash.axis.domain.model.StudentMarkerType
 import com.ash.axis.domain.model.markerNoClassDates
 import com.ash.axis.domain.usecase.AbsenceRange
 import com.ash.axis.domain.usecase.AttendanceUseCase
+import com.ash.axis.domain.usecase.ForecastEndDate
 import com.ash.axis.domain.usecase.PlannerUseCase
 import com.ash.axis.domain.usecase.ProjectedSubject
 import com.ash.axis.domain.usecase.SubjectAttendance
@@ -88,19 +91,11 @@ class PlannerViewModel
                 var previousKey: AttendanceKey? = null
                 var handledRefresh = 0
                 combine(
-                    coordinator.activeContext,
-                    coordinator.selectedSemester,
+                    coordinator.attendanceSelection(),
                     coordinator.transition,
                     refreshRequest,
-                ) { context, selection, _, refresh ->
-                    val option = selection.option
-                    val key =
-                        if (context != null && context == selection.context && option != null) {
-                            AttendanceKey(context, option.classId, option.yearId)
-                        } else {
-                            null
-                        }
-                    Triple(key, selection.error, refresh)
+                ) { selection, _, refresh ->
+                    Triple(selection.attendanceKey, selection.error, refresh)
                 }.collectLatest { (key, error, refresh) ->
                     if (key != previousKey) inputs.value = ForecastInputs()
                     previousKey = key
@@ -148,7 +143,7 @@ class PlannerViewModel
                     preferencesStore.getUserInt("attendance_threshold", 75),
                     preferencesStore.getUserString("semester_end_date", ""),
                 ) { combined, threshold, end ->
-                    ForecastPreferences(combined, threshold, runCatching { LocalDate.parse(end) }.getOrNull())
+                    ForecastPreferences(combined, threshold, end)
                 }
             val options =
                 combine(
@@ -181,7 +176,7 @@ class PlannerViewModel
             val input = options.input
             val online = options.online
             val demandError = options.error
-            val end = (input.end ?: preferences.semesterEnd)?.takeUnless { it < today }
+            val end = ForecastEndDate.resolve(preferences.semesterEnd, today)
             val weekly = week.data?.weekly.orEmpty()
             val noClassDates = markerNoClassDates(markers)
             val todaySlots =
@@ -210,7 +205,7 @@ class PlannerViewModel
                 input.error ?: (attendance.error ?: week.error ?: demandError)?.let(ErrorText::forData)
                     ?: if (week.data != null && !hasSchedule) "No weekly classes available. Refresh the timetable to forecast." else null
             val projected =
-                if (attendance.data != null && hasSchedule && end != null && todayAttendance != null) {
+                if (attendance.data != null && hasSchedule && todayAttendance != null) {
                     withContext(calculationDispatcher) {
                         plannerUseCase.forecast(
                             subjects,
@@ -250,7 +245,11 @@ class PlannerViewModel
 
         fun setForecastEnd(date: LocalDate) {
             if (date < LocalDate.now(clock)) return
-            inputs.update { it.copy(end = date) }
+            val context = coordinator.activeContext.value ?: return
+            val key = preferencesStore.userScoped("semester_end_date")
+            viewModelScope.launch {
+                if (coordinator.activeContext.value == context) preferencesStore.putString(key, date.toString())
+            }
         }
 
         fun setTodayAttendance(choice: TodayAttendance) {
@@ -275,14 +274,12 @@ class PlannerViewModel
             inputs.update { it.copy(absences = persistentListOf()) }
         }
 
-        fun addMarker(
-            title: String,
-            type: StudentMarkerType,
+        fun addNoClassDays(
             start: LocalDate,
             end: LocalDate,
         ) {
-            if (title.isBlank() || end < start) return
-            editMarkers { owner -> markerRepository.add(owner, title, type, start, end) }
+            if (end < start) return
+            editMarkers { owner -> markerRepository.add(owner, "No class", StudentMarkerType.HOLIDAY, start, end) }
         }
 
         fun deleteMarker(id: Long) = editMarkers { owner -> markerRepository.delete(owner, id) }
@@ -308,13 +305,12 @@ class PlannerViewModel
         )
 
         private data class ForecastInputs(
-            val end: LocalDate? = null,
             val absences: ImmutableList<AbsenceRange> = persistentListOf(),
             val answer: TodayAnswer? = null,
             val error: String? = null,
         )
 
-        private data class ForecastPreferences(val combined: Boolean, val threshold: Int, val semesterEnd: LocalDate?)
+        private data class ForecastPreferences(val combined: Boolean, val threshold: Int, val semesterEnd: String)
 
         private data class ForecastOptions(
             val preferences: ForecastPreferences,

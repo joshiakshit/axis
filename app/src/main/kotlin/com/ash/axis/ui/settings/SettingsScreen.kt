@@ -46,7 +46,7 @@ fun SettingsScreen(
         contentPadding = PaddingValues(horizontal = AppDimens.screenPadding),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        item { Spacer(Modifier.height(10.dp)) }
+        item { Spacer(Modifier.height(14.dp)) }
         item { SettingsHeader() }
 
         if (state.userName.isNotBlank()) {
@@ -56,18 +56,6 @@ fun SettingsScreen(
         item { SectionLabel("APPEARANCE") }
         item { ThemeSelector(state.themeMode, viewModel::setThemeMode) }
         item { AccentSelector(state.accentHex, viewModel::setAccent) }
-
-        item { SectionLabel("ATTENDANCE") }
-        item {
-            AttendanceSettings(
-                threshold = state.threshold,
-                onThresholdChange = viewModel::setThreshold,
-                semesterEndDate = state.semesterEndDate,
-                onSemesterEndDateChange = viewModel::setSemesterEndDate,
-                combinedAttendance = state.combinedAttendance,
-                onCombinedAttendanceChange = viewModel::setCombinedAttendance,
-            )
-        }
 
         item { SectionLabel("EXPORT") }
         item {

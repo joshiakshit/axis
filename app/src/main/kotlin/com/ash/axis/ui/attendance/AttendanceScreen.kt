@@ -1,28 +1,21 @@
 package com.ash.axis.ui.attendance
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ash.axis.ui.BottomSpacer
-import com.ash.core.ui.components.AppCard
 import com.ash.core.ui.components.AppSectionLabel
 import com.ash.core.ui.components.LoadingStateContainer
 import com.ash.core.ui.components.OfflineBanner
@@ -45,13 +38,17 @@ fun AttendanceScreen(
 
     LoadingStateContainer(result = result, modifier = modifier, onRetry = viewModel::refresh) { data ->
         PullToRefreshContainer(isRefreshing = data.isRefreshing, onRefresh = viewModel::refresh) {
-            AttendanceContent(data)
+            AttendanceContent(data, viewModel::setThreshold, viewModel::setCombinedAttendance)
         }
     }
 }
 
 @Composable
-private fun AttendanceContent(data: AttendanceUiState) {
+private fun AttendanceContent(
+    data: AttendanceUiState,
+    onThresholdChange: (Int) -> Unit,
+    onCombinedAttendanceChange: (Boolean) -> Unit,
+) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = AppDimens.screenPadding),
@@ -64,10 +61,7 @@ private fun AttendanceContent(data: AttendanceUiState) {
             item(contentType = "refresh_error") { Text(message, color = MaterialTheme.colorScheme.error) }
         }
         item { Spacer(Modifier.height(14.dp)) }
-        if (data.semesterLabel.isNotBlank()) {
-            item { SemesterBanner(data.semesterLabel) }
-        }
-        item { OverallSummaryCard(data) }
+        item { OverallSummaryCard(data, onThresholdChange, onCombinedAttendanceChange) }
 
         subjectGroups(data.subjects).forEach { group ->
             item(contentType = "section_label") { AppSectionLabel(group.title.uppercase()) }
@@ -85,32 +79,5 @@ private fun AttendanceContent(data: AttendanceUiState) {
         }
 
         item { BottomSpacer() }
-    }
-}
-
-@Composable
-private fun SemesterBanner(label: String) {
-    AppCard {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "SEMESTER",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.6.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    label,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-        }
     }
 }

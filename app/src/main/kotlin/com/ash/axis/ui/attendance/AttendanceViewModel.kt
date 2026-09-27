@@ -5,7 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.ash.axis.data.academic.AcademicDataCoordinator
 import com.ash.axis.data.academic.AcademicSemesterSelection
 import com.ash.axis.data.academic.AcademicSnapshot
-import com.ash.axis.data.repository.AttendanceKey
+import com.ash.axis.data.academic.observeAttendance
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.TimetableData
 import com.ash.axis.data.repository.TimetableKey
@@ -14,6 +14,7 @@ import com.ash.axis.domain.model.AttendanceEntry
 import com.ash.axis.domain.model.AttendanceResponse
 import com.ash.axis.domain.usecase.AttendanceTone
 import com.ash.axis.domain.usecase.AttendanceUseCase
+import com.ash.axis.domain.usecase.ForecastEndDate
 import com.ash.axis.domain.usecase.ForecastRow
 import com.ash.axis.domain.usecase.ForecastUseCase
 import com.ash.axis.domain.usecase.SubjectAttendance
@@ -31,11 +32,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.time.LocalDate
 import javax.inject.Inject
 
 data class DecoratedSubject(
@@ -48,7 +47,6 @@ data class DecoratedSubject(
 data class AttendanceUiState(
     val isLoading: Boolean = true,
     val error: String? = null,
-    val semesterLabel: String = "",
     val overallPercent: Double = 0.0,
     val overallPresent: Int = 0,
     val overallTotal: Int = 0,
@@ -57,6 +55,7 @@ data class AttendanceUiState(
     val forecast: ImmutableList<ForecastRow> = persistentListOf(),
     val isRefreshing: Boolean = false,
     val threshold: Int = 75,
+    val combinedAttendance: Boolean = false,
     val isOffline: Boolean = false,
     val hasData: Boolean = false,
     val semesterError: String? = null,
@@ -90,31 +89,7 @@ class AttendanceViewModel
                 }
             }
             viewModelScope.launch {
-                var observedKey: AttendanceKey? = null
-                val semesterSnapshot =
-                    coordinator.selectedSemester.flatMapLatest { selection ->
-                        val context = coordinator.activeContext.value
-                        val option = selection.option
-                        val current = if (selection.context == context) selection else AcademicSemesterSelection(context)
-                        val key =
-                            if (context != null && option != null && selection.context == context) {
-                                AttendanceKey(context, option.classId, option.yearId)
-                            } else {
-                                null
-                            }
-                        flow {
-                            if (key != observedKey) {
-                                observedKey = key
-                                manualAttendanceError.value = null
-                                emit(current to AcademicSnapshot<AttendanceResponse>())
-                            }
-                            if (key == null) {
-                                emit(current to AcademicSnapshot<AttendanceResponse>())
-                            } else {
-                                attendanceRepo.observeSummary(key).collect { emit(current to it) }
-                            }
-                        }
-                    }
+                val semesterSnapshot = coordinator.observeAttendance(attendanceRepo) { manualAttendanceError.value = null }
                 val weekSnapshot =
                     coordinator.activeContext.flatMapLatest { context ->
                         if (context == null || context.academicYear.isBlank()) {
@@ -124,15 +99,35 @@ class AttendanceViewModel
                             timetableRepo.observeWeek(TimetableKey(context, start.toString(), end.toString()))
                         }
                     }
+                val preferences =
+                    coordinator.activeContext.flatMapLatest { context ->
+                        if (context == null) {
+                            flowOf(AttendancePreferences(null, 75, false, ""))
+                        } else {
+                            combine(
+                                preferencesStore.getUserInt("attendance_threshold", 75),
+                                preferencesStore.getUserBoolean("combined_attendance"),
+                                preferencesStore.getUserString("semester_end_date", ""),
+                            ) { threshold, combined, endDate ->
+                                AttendancePreferences(context.admno, threshold, combined, endDate)
+                            }
+                        }
+                    }
                 val base =
                     combine(
                         semesterSnapshot,
                         weekSnapshot,
-                        preferencesStore.getUserInt("attendance_threshold", 75),
-                        preferencesStore.getUserBoolean("combined_attendance"),
-                        preferencesStore.getUserString("semester_end_date", ""),
-                    ) { selection, week, threshold, combined, endDate ->
-                        Presentation(selection.first, selection.second, week, threshold, combined, endDate)
+                        preferences,
+                    ) { selection, week, prefs ->
+                        val current = prefs.takeIf { it.owner == selection.first.context?.admno }
+                        Presentation(
+                            selection.first,
+                            selection.second,
+                            week,
+                            current?.threshold ?: 75,
+                            current?.combined ?: false,
+                            current?.endDate.orEmpty(),
+                        )
                     }
                 combine(
                     base,
@@ -180,10 +175,25 @@ class AttendanceViewModel
             }
         }
 
+        fun setThreshold(value: Int) {
+            val context = coordinator.activeContext.value ?: return
+            val key = preferencesStore.userScoped("attendance_threshold")
+            viewModelScope.launch {
+                if (coordinator.activeContext.value == context) preferencesStore.putInt(key, value.coerceIn(50, 95))
+            }
+        }
+
+        fun setCombinedAttendance(enabled: Boolean) {
+            val context = coordinator.activeContext.value ?: return
+            val key = preferencesStore.userScoped("combined_attendance")
+            viewModelScope.launch {
+                if (coordinator.activeContext.value == context) preferencesStore.putBoolean(key, enabled)
+            }
+        }
+
         @Suppress("LongMethod")
         private fun applyPresentation(presentation: Presentation) {
             val selection = presentation.selection
-            val semester = selection.option
             val snapshot = presentation.attendance
             val week = presentation.week
             val threshold = presentation.threshold
@@ -191,26 +201,7 @@ class AttendanceViewModel
             val endDateText = presentation.endDate
             val data = snapshot.data
             val error = presentation.error?.let(ErrorText::forData)
-            if (data == null) {
-                _state.update {
-                    it.copy(
-                        isLoading = error == null,
-                        error = error,
-                        semesterError = selection.error?.let(ErrorText::forData),
-                        semesterLabel = semester?.label.orEmpty(),
-                        overallPercent = 0.0,
-                        overallPresent = 0,
-                        overallTotal = 0,
-                        overallTone = AttendanceTone.OK,
-                        subjects = persistentListOf(),
-                        forecast = persistentListOf(),
-                        isRefreshing = snapshot.refreshing,
-                        hasData = false,
-                    )
-                }
-                return
-            }
-            val raw = data.table.values.map { it.toSubjectAttendance() }
+            val raw = data?.table?.values.orEmpty().map { it.toSubjectAttendance() }
             val subjects = if (combined) attendanceUseCase.combineSubjects(raw) else raw
             val decorated =
                 subjects.map { subject ->
@@ -221,23 +212,23 @@ class AttendanceViewModel
                         attendanceUseCase.tone(subject.percent, threshold),
                     )
                 }.sortedBy { it.subject.percent }
-            val endDate = endDateText.takeIf(String::isNotBlank)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+            val endDate = ForecastEndDate.resolve(endDateText)
             val forecast = forecastUseCase.buildForecast(subjects, week.data?.weekly.orEmpty(), threshold, endDate)
             _state.update {
                 it.copy(
-                    isLoading = false,
+                    isLoading = data == null && error == null,
                     error = error,
                     semesterError = selection.error?.let(ErrorText::forData),
-                    semesterLabel = semester?.label.orEmpty(),
-                    overallPercent = data.endrow.percentage,
-                    overallPresent = data.endrow.present,
-                    overallTotal = data.endrow.total,
-                    overallTone = attendanceUseCase.tone(data.endrow.percentage, threshold),
+                    overallPercent = data?.endrow?.percentage ?: 0.0,
+                    overallPresent = data?.endrow?.present ?: 0,
+                    overallTotal = data?.endrow?.total ?: 0,
+                    overallTone = data?.let { attendanceUseCase.tone(it.endrow.percentage, threshold) } ?: AttendanceTone.OK,
                     subjects = decorated.toImmutableList(),
                     forecast = forecast.toImmutableList(),
                     isRefreshing = snapshot.refreshing,
                     threshold = threshold,
-                    hasData = true,
+                    combinedAttendance = combined,
+                    hasData = data != null,
                 )
             }
         }
@@ -252,5 +243,12 @@ class AttendanceViewModel
             val combined: Boolean,
             val endDate: String,
             val error: Throwable? = null,
+        )
+
+        private data class AttendancePreferences(
+            val owner: String?,
+            val threshold: Int,
+            val combined: Boolean,
+            val endDate: String,
         )
     }

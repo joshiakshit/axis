@@ -54,6 +54,10 @@ class PlannerForecastViewModelTest {
     private val transition = MutableStateFlow(0L)
     private val attendance = mockk<AttendanceRepository>()
     private val timetable = mockk<TimetableRepository>()
+    private val markerRepo = mockk<StudentMarkerRepository>()
+    private val coordinator = mockk<AcademicDataCoordinator>(relaxed = true)
+    private val savedEnd = MutableStateFlow(today.plusDays(7).toString())
+    private val preferences = mockk<PreferencesStore>()
     private val markers = MutableStateFlow<List<StudentMarker>>(emptyList())
     private val summary =
         MutableStateFlow(
@@ -96,7 +100,6 @@ class PlannerForecastViewModelTest {
     @BeforeEach
     fun setUp() {
         Dispatchers.setMain(dispatcher)
-        val coordinator = mockk<AcademicDataCoordinator>(relaxed = true)
         every { coordinator.activeContext } returns context
         every { coordinator.selectedSemester } returns selection
         every { coordinator.transition } returns transition
@@ -104,12 +107,14 @@ class PlannerForecastViewModelTest {
         every { coordinator.timetableDemandError } returns MutableStateFlow(null)
         coEvery { attendance.observeSummary(any()) } returns summary
         coEvery { timetable.observeWeek(any()) } returns week
-        val markerRepo = mockk<StudentMarkerRepository>()
         every { markerRepo.observe(any()) } returns markers
-        val preferences = mockk<PreferencesStore>()
         every { preferences.getUserInt(any(), any()) } returns flowOf(75)
         every { preferences.getUserBoolean(any(), any()) } returns flowOf(false)
-        every { preferences.getUserString("semester_end_date", "") } returns flowOf(today.plusDays(7).toString())
+        every { preferences.getUserString("semester_end_date", "") } returns savedEnd
+        every { preferences.userScoped("semester_end_date") } returns "A_semester_end_date"
+        coEvery { preferences.putString("A_semester_end_date", any()) } coAnswers {
+            savedEnd.value = secondArg()
+        }
         val network = mockk<NetworkMonitor>()
         every { network.isOnline } returns MutableStateFlow(true)
         viewModel =
@@ -125,6 +130,44 @@ class PlannerForecastViewModelTest {
         viewModel.viewModelScope.cancel()
         Dispatchers.resetMain()
     }
+
+    @Test
+    fun `new no-class days use existing marker storage`() =
+        runTest(dispatcher) {
+            val start = today.plusDays(4)
+            val end = start.plusDays(2)
+            coEvery { markerRepo.add("A", "No class", StudentMarkerType.HOLIDAY, start, end) } returns Unit
+            runCurrent()
+            viewModel.addNoClassDays(start, end)
+            runCurrent()
+            coVerify(exactly = 1) { markerRepo.add("A", "No class", StudentMarkerType.HOLIDAY, start, end) }
+        }
+
+    @Test
+    fun `existing saved end remains active and a changed account cancels pending save`() =
+        runTest(dispatcher) {
+            runCurrent()
+            assertEquals(today.plusDays(7), viewModel.state.value.forecastEnd)
+            viewModel.setForecastEnd(today.plusDays(15))
+            context.value = StudentRequestContext("B", 2, "Other", "2026")
+            runCurrent()
+            coVerify(exactly = 0) { preferences.putString(any(), any()) }
+        }
+
+    @Test
+    fun `forecast end persists through the account preference without fetching data`() =
+        runTest(dispatcher) {
+            runCurrent()
+            val end = today.plusDays(12)
+            viewModel.setForecastEnd(end)
+            runCurrent()
+            assertEquals(end, viewModel.state.value.forecastEnd)
+            coVerify(exactly = 1) { preferences.putString("A_semester_end_date", end.toString()) }
+            coVerify(exactly = 1) { attendance.observeSummary(any()) }
+            coVerify(exactly = 1) { timetable.observeWeek(any()) }
+            coVerify(exactly = 0) { coordinator.refreshAttendance() }
+            coVerify(exactly = 0) { coordinator.refreshTimetable() }
+        }
 
     @Test
     fun `forecast horizon and absences never request future timetable weeks`() =

@@ -4,6 +4,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,11 +21,22 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -34,9 +46,19 @@ import com.ash.core.ui.theme.AppDimens
 import com.ash.core.ui.theme.AppShapes
 import com.ash.core.ui.theme.cardColor
 import java.util.Locale
+import kotlin.math.roundToInt
 
 @Composable
-internal fun OverallSummaryCard(data: AttendanceUiState) {
+internal fun OverallSummaryCard(
+    data: AttendanceUiState,
+    onThresholdChange: (Int) -> Unit,
+    onCombinedAttendanceChange: (Boolean) -> Unit,
+) {
+    var draggingTarget by remember { mutableStateOf<Int?>(null) }
+    val shownTarget = draggingTarget ?: data.threshold
+    LaunchedEffect(data.threshold) {
+        if (draggingTarget == data.threshold) draggingTarget = null
+    }
     val animatedProgress by animateFloatAsState(
         targetValue = if (data.overallTotal > 0) (data.overallPercent / 100.0).toFloat().coerceIn(0f, 1f) else 0f,
         animationSpec = tween(800),
@@ -54,9 +76,9 @@ internal fun OverallSummaryCard(data: AttendanceUiState) {
         color = cardColor(),
     ) {
         Column(modifier = Modifier.padding(AppDimens.cardPadding)) {
-            OverallSummaryHeader(data, toneColor)
+            OverallSummaryHeader(data, toneColor, onCombinedAttendanceChange)
             Spacer(Modifier.height(20.dp))
-            OverallProgressBar(data.threshold, animatedProgress, toneColor)
+            OverallProgressBar(shownTarget, animatedProgress, toneColor, onThresholdChange) { draggingTarget = it }
         }
     }
 }
@@ -65,13 +87,14 @@ internal fun OverallSummaryCard(data: AttendanceUiState) {
 private fun OverallSummaryHeader(
     data: AttendanceUiState,
     toneColor: Color,
+    onCombinedAttendanceChange: (Boolean) -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column {
+        Column(modifier = Modifier.weight(1f)) {
             Text(
                 String.format(Locale.US, "%.1f%%", data.overallPercent),
                 fontSize = 44.sp,
@@ -86,17 +109,37 @@ private fun OverallSummaryHeader(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Surface(
-            shape = AppShapes.full,
-            color = toneColor.copy(alpha = 0.14f),
-        ) {
-            Text(
-                data.overallTone.summaryLabel(),
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = toneColor,
-            )
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(
+                onClick = { onCombinedAttendanceChange(!data.combinedAttendance) },
+                modifier =
+                    Modifier.semantics {
+                        contentDescription =
+                            if (data.combinedAttendance) "Separate lecture and practical" else "Combine lecture and practical"
+                    },
+                shape = AppShapes.full,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+            ) {
+                Text(
+                    if (data.combinedAttendance) "Separate" else "Combine",
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Surface(
+                shape = AppShapes.full,
+                color = toneColor.copy(alpha = 0.14f),
+            ) {
+                Text(
+                    data.overallTone.summaryLabel(),
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = toneColor,
+                )
+            }
         }
     }
 }
@@ -106,8 +149,40 @@ private fun OverallProgressBar(
     threshold: Int,
     animatedProgress: Float,
     toneColor: Color,
+    onThresholdChange: (Int) -> Unit,
+    onDragTargetChange: (Int?) -> Unit,
 ) {
-    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+    var dragGoal by remember { mutableIntStateOf(threshold) }
+    Box(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .height(24.dp)
+                .pointerInput(onThresholdChange) {
+                    detectHorizontalDragGestures(
+                        onDragStart = {
+                            dragGoal = goalAtPosition(it.x, size.width.toFloat())
+                            onDragTargetChange(dragGoal)
+                        },
+                        onDragEnd = {
+                            onThresholdChange(dragGoal)
+                            if (dragGoal == threshold) onDragTargetChange(null)
+                        },
+                        onDragCancel = { onDragTargetChange(null) },
+                    ) { change, _ ->
+                        dragGoal = goalAtPosition(change.position.x, size.width.toFloat())
+                        onDragTargetChange(dragGoal)
+                    }
+                }.semantics {
+                    contentDescription = "Attendance goal"
+                    progressBarRangeInfo = ProgressBarRangeInfo(threshold.toFloat(), 50f..95f, 8)
+                    setProgress {
+                        onThresholdChange(goalAtPosition(it, 100f))
+                        true
+                    }
+                },
+        contentAlignment = Alignment.Center,
+    ) {
         LinearProgressIndicator(
             progress = { animatedProgress },
             modifier = Modifier.fillMaxWidth().height(AppDimens.progressBarHeight).clip(AppShapes.full),
@@ -134,6 +209,11 @@ private fun OverallProgressBar(
     Spacer(Modifier.height(8.dp))
     ProgressLabels(threshold)
 }
+
+internal fun goalAtPosition(
+    position: Float,
+    width: Float,
+): Int = ((position / width * 100f / 5f).roundToInt() * 5).coerceIn(50, 95)
 
 @Composable
 private fun ProgressLabels(threshold: Int) {

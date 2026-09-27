@@ -28,7 +28,7 @@ class ForecastUseCase
             endDate: LocalDate? = null,
         ): List<ForecastRow> {
             val today = LocalDate.now()
-            val horizon = endDate ?: today.plusDays(DEFAULT_HORIZON_DAYS)
+            val horizon = endDate ?: ForecastEndDate.resolve("", today)
             return subjects.filter { it.percent < threshold }.map { subject ->
                 val matchingSlots = countWeeklySlots(subject.subCode, weeklySlots)
                 val reachDate =
@@ -114,10 +114,6 @@ class ForecastUseCase
                 t += slotsToday
             }
             return if (t > 0) p * 100.0 / t else 0.0
-        }
-
-        companion object {
-            private const val DEFAULT_HORIZON_DAYS = 120L
         }
 
         private fun slotMatchesSubject(
