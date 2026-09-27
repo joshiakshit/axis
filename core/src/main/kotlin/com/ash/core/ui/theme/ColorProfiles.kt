@@ -25,9 +25,6 @@ data class ColorProfile(
     val surfaceVariant: Color,
     val onSurfaceVariant: Color,
     val outline: Color,
-    val ok: Color = Color(0xFF34C759),
-    val warn: Color = Color(0xFFF59E0B),
-    val bad: Color = Color(0xFFEF4444),
 )
 
 object ColorProfiles {

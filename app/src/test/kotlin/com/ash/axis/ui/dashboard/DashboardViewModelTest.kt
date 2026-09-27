@@ -9,6 +9,7 @@ import com.ash.axis.data.repository.AuthRepository
 import com.ash.axis.data.repository.TimetableData
 import com.ash.axis.data.repository.TimetableRepository
 import com.ash.axis.domain.model.AttendanceEndRow
+import com.ash.axis.domain.model.AttendanceEntry
 import com.ash.axis.domain.model.AttendanceResponse
 import com.ash.axis.domain.model.SemesterOption
 import com.ash.axis.domain.model.StudentRequestContext
@@ -91,12 +92,25 @@ class DashboardViewModelTest {
                         network,
                     )
                 runCurrent()
-                summary.value = AcademicSnapshot(data = AttendanceResponse(endrow = AttendanceEndRow(8, 10, 80.0)))
+                summary.value =
+                    AcademicSnapshot(
+                        data =
+                            AttendanceResponse(
+                                table =
+                                    mapOf(
+                                        "math" to AttendanceEntry(subCode = "MATH", percent = 80.0),
+                                        "physics" to AttendanceEntry(subCode = "PHYS", percent = 60.0),
+                                    ),
+                                endrow = AttendanceEndRow(8, 10, 80.0),
+                            ),
+                    )
                 week.value = AcademicSnapshot(error = IllegalStateException("Schedule failed"))
                 runCurrent()
                 assertTrue(viewModel.state.value.hasAttendance)
                 assertFalse(viewModel.state.value.hasTimetable)
                 assertEquals(80.0, viewModel.state.value.overallPercent)
+                assertEquals(2, viewModel.state.value.subjectCount)
+                assertEquals(1, viewModel.state.value.atRiskCount)
                 assertEquals("Schedule failed", viewModel.state.value.timetableError)
 
                 threshold.value = 85

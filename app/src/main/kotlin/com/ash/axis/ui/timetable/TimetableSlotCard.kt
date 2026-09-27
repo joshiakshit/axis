@@ -3,14 +3,10 @@ package com.ash.axis.ui.timetable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -23,9 +19,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ash.core.ui.components.AppCard
@@ -33,21 +29,16 @@ import com.ash.core.ui.components.StatusBadge
 import com.ash.core.ui.theme.AppDimens
 import com.ash.core.ui.theme.AppShapes
 import com.ash.core.ui.theme.SubjectColors
-import com.ash.core.ui.theme.cardColor
-import com.ash.core.ui.theme.highlightColor
 
-@Suppress("LongMethod")
 @Composable
 internal fun TimetableSlotCard(
     displaySlot: DisplaySlot,
     modifier: Modifier = Modifier,
 ) {
     val slot = displaySlot.slot
-    val isActive = displaySlot.progress != null && displaySlot.progress > 0f && displaySlot.progress < 1f
-    val isSub = displaySlot.isSubstitution
+    val isActive = displaySlot.progress?.let { it > 0f && it < 1f } == true
     val slotCode = (slot.subCode.takeIf { it.isNotBlank() } ?: slot.sub_shortname ?: slot.sub_short ?: slot.subjectId).uppercase()
-    val tagColor = SubjectColors.accent(slotCode)
-    val subColor = MaterialTheme.colorScheme.tertiary
+    val accent = SubjectColors.accent(slotCode)
     val animatedProgress by animateFloatAsState(
         targetValue = displaySlot.progress ?: 0f,
         animationSpec = tween(600),
@@ -55,144 +46,91 @@ internal fun TimetableSlotCard(
     )
 
     AppCard(
-        modifier = modifier.fillMaxWidth(),
-        color =
-            when {
-                isSub -> subColor.copy(alpha = 0.06f)
-                isActive -> highlightColor(alpha = 0.15f)
-                else -> cardColor()
-            },
-        border = if (isSub) BorderStroke(1.dp, subColor.copy(alpha = 0.25f)) else null,
+        modifier = modifier,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
-        Row(modifier = Modifier.height(IntrinsicSize.Min)) {
-            SubjectStripe(tagColor)
+        Column(modifier = Modifier.padding(AppDimens.cardPadding)) {
             Row(
-                modifier = Modifier.weight(1f).padding(AppDimens.cardPadding),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                SlotTimeColumn(displaySlot)
-                Column(modifier = Modifier.weight(1f)) {
-                    SlotBadgeRow(
-                        slotCode = slotCode,
-                        tagColor = tagColor,
-                        lectType = slot.lectType,
-                        isSub = isSub,
-                        isActive = isActive,
-                    )
+                Column(modifier = Modifier.width(70.dp)) {
                     Text(
-                        displaySlot.displayName,
+                        slot.fromTime,
                         fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
-                    if (!displaySlot.teacherName.isNullOrBlank() && !displaySlot.isSubstitution) {
-                        Text(
-                            displaySlot.teacherName,
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    SubstitutionDetail(displaySlot)
                     Text(
-                        buildString {
-                            if (slot.roomno.isNotBlank()) append("Room ${slot.roomno}")
-                        },
-                        fontSize = 12.sp,
+                        "to ${slot.toTime}",
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    SlotProgress(displaySlot.progress, animatedProgress, tagColor)
                 }
+                SlotDetails(displaySlot, slotCode, accent, isActive, Modifier.weight(1f))
+            }
+            if (isActive) {
+                Spacer(Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress = { animatedProgress },
+                    modifier = Modifier.fillMaxWidth().height(AppDimens.progressBarHeight).clip(AppShapes.full),
+                    color = accent,
+                    trackColor = accent.copy(alpha = 0.12f),
+                )
             }
         }
     }
 }
 
 @Composable
-private fun SubjectStripe(tagColor: androidx.compose.ui.graphics.Color) {
-    Box(
-        modifier =
-            Modifier
-                .fillMaxHeight()
-                .width(AppDimens.subjectStripeWidth)
-                .background(tagColor),
-    )
-}
-
-@Composable
-private fun SlotTimeColumn(displaySlot: DisplaySlot) {
-    val slot = displaySlot.slot
-    Column(modifier = Modifier.width(AppDimens.timeColumnWidth)) {
-        Text(
-            formatTime12h(slot.fromTime),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
-            fontFamily = FontFamily.Monospace,
-        )
-        Text(
-            formatTime12h(slot.toTime),
-            fontSize = 10.sp,
-            fontFamily = FontFamily.Monospace,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-private fun formatTime12h(time: String): String {
-    if (time.isBlank()) return ""
-    val parts = time.split(":")
-    val h = parts.getOrNull(0)?.toIntOrNull() ?: return time
-    val m = parts.getOrNull(1)?.toIntOrNull() ?: 0
-    val suffix = if (h < 12) "AM" else "PM"
-    val h12 =
-        when {
-            h == 0 -> 12
-            h > 12 -> h - 12
-            else -> h
-        }
-    return if (m == 0) "$h12 $suffix" else "$h12:${m.toString().padStart(2, '0')} $suffix"
-}
-
-@Composable
-private fun SlotBadgeRow(
+private fun SlotDetails(
+    displaySlot: DisplaySlot,
     slotCode: String,
-    tagColor: androidx.compose.ui.graphics.Color,
-    lectType: String,
-    isSub: Boolean,
+    accent: Color,
     isActive: Boolean,
+    modifier: Modifier,
 ) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text(
-            slotCode,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.SemiBold,
-            fontFamily = FontFamily.Monospace,
-            color = tagColor,
-        )
-        if (lectType.isNotBlank()) {
-            StatusBadge(text = lectureTypeBadge(lectType))
-        }
-        if (isSub) {
-            val subColor = MaterialTheme.colorScheme.tertiary
-            StatusBadge(
-                text = "SUB",
-                color = subColor,
-                background = subColor.copy(alpha = 0.15f),
+    val slot = displaySlot.slot
+    Column(modifier = modifier) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                displaySlot.displayName,
+                modifier = Modifier.weight(1f),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
             )
+            if (slot.lectType.isNotBlank()) {
+                StatusBadge(text = lectureTypeBadge(slot.lectType))
+            }
         }
-        if (isActive) {
-            StatusBadge(
-                text = "LIVE",
-                color = MaterialTheme.colorScheme.primary,
-                background = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-            )
+        val details = listOfNotNull(slotCode.takeIf { it.isNotBlank() }, slot.roomno.takeIf { it.isNotBlank() }?.let { "Room $it" })
+        if (details.isNotEmpty()) {
+            Text(details.joinToString(" · "), fontSize = 12.sp, color = accent)
+        }
+        val teacher = teacherLabel(displaySlot)
+        if (teacher.isNotBlank()) {
+            Text(teacher, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (displaySlot.isSubstitution || isActive) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (displaySlot.isSubstitution) StatusBadge(text = "SUB")
+                if (isActive) StatusBadge(text = "LIVE")
+            }
         }
     }
+}
+
+private fun teacherLabel(displaySlot: DisplaySlot): String {
+    if (!displaySlot.isSubstitution) return displaySlot.teacherName.orEmpty()
+    return listOfNotNull(
+        displaySlot.substituteTeacher?.takeIf { it.isNotBlank() }?.let { "Substitute: $it" },
+        displaySlot.teacherName?.takeIf { it.isNotBlank() }?.let { "for $it" },
+    ).joinToString(" ")
 }
 
 private fun lectureTypeBadge(lectType: String): String =
@@ -201,48 +139,3 @@ private fun lectureTypeBadge(lectType: String): String =
         lectType.equals("PR", ignoreCase = true) -> "LAB"
         else -> "LEC"
     }
-
-@Composable
-private fun SubstitutionDetail(displaySlot: DisplaySlot) {
-    if (!displaySlot.isSubstitution) return
-
-    val subColor = MaterialTheme.colorScheme.tertiary
-    val detail =
-        buildString {
-            val sub = displaySlot.substituteTeacher
-            val orig = displaySlot.originalTeacher
-            if (!sub.isNullOrBlank()) append(sub)
-            if (!orig.isNullOrBlank()) {
-                if (isNotEmpty()) append(" - ")
-                append("for $orig")
-            }
-        }
-    if (detail.isNotBlank()) {
-        Text(
-            detail,
-            fontSize = 11.sp,
-            color = subColor.copy(alpha = 0.8f),
-        )
-    }
-}
-
-@Composable
-private fun SlotProgress(
-    progress: Float?,
-    animatedProgress: Float,
-    tagColor: androidx.compose.ui.graphics.Color,
-) {
-    if (progress == null) return
-
-    Spacer(Modifier.height(8.dp))
-    LinearProgressIndicator(
-        progress = { animatedProgress },
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .height(AppDimens.progressBarHeight)
-                .clip(AppShapes.full),
-        color = tagColor,
-        trackColor = tagColor.copy(alpha = 0.12f),
-    )
-}

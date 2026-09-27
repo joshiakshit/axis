@@ -71,7 +71,6 @@ dependencies {
     testImplementation(libs.junit5.api)
     testRuntimeOnly(libs.junit5.engine)
     testImplementation(libs.mockk)
-    testImplementation(libs.turbine)
     testImplementation(libs.coroutines.test)
 }
 

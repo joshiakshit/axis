@@ -48,7 +48,7 @@ internal fun GreetingHeader(firstName: String) {
     Column {
         Text(
             "$greeting, $name",
-            fontSize = 22.sp,
+            fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = (-0.5).sp,
             color = MaterialTheme.colorScheme.onBackground,

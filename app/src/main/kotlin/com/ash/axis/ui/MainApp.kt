@@ -58,7 +58,6 @@ internal fun MainApp(
     var showQrFlow by remember { mutableStateOf(false) }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-    LaunchedEffect(currentRoute) { currentRoute?.let(onRouteVisible) }
 
     val updateViewModel: UpdateViewModel = hiltViewModel()
     val updateConfig by updateViewModel.config.collectAsStateWithLifecycle()
@@ -69,6 +68,7 @@ internal fun MainApp(
 
     LaunchedEffect(currentRoute) {
         val route = currentRoute
+        route?.let(onRouteVisible)
         if (route != null && route in tabRoutes) {
             preferencesStore.putString("last_route", route)
         }
@@ -141,7 +141,6 @@ internal fun MainApp(
             onShowMessage = qrViewModel::showMessage,
             onClearMessage = qrViewModel::clearMessage,
             onDismiss = { showQrFlow = false },
-            diagnostics = qrViewModel.diagnostics,
         )
 
         if (completedUpdate == null && !updateDismissed && updateViewModel.available(updateConfig)) {

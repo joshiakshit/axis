@@ -29,10 +29,12 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.ash.axis.ui.attendance.AttendanceScreen
 import com.ash.axis.ui.daywise.DaywiseScreen
 import com.ash.axis.ui.planner.PlannerScreen
+import com.ash.core.ui.theme.AppDimens
 import com.ash.core.ui.theme.AppShapes
 import kotlinx.coroutines.launch
 
@@ -59,6 +61,12 @@ fun AcademicsScreen(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
+        Text(
+            "Attendance",
+            modifier = Modifier.padding(start = AppDimens.screenPadding, top = 14.dp, bottom = 8.dp),
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+        )
         TabRow(
             selectedTabIndex = pagerState.currentPage,
             containerColor = Color.Transparent,

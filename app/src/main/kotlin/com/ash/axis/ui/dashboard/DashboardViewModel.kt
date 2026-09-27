@@ -5,7 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.ash.axis.data.academic.AcademicDataCoordinator
 import com.ash.axis.data.academic.AcademicSemesterSelection
 import com.ash.axis.data.academic.AcademicSnapshot
-import com.ash.axis.data.repository.AttendanceKey
+import com.ash.axis.data.academic.observeAttendance
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
 import com.ash.axis.data.repository.TimetableData
@@ -31,7 +31,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -39,16 +38,6 @@ import java.time.LocalDate
 import java.time.format.TextStyle
 import java.util.Locale
 import javax.inject.Inject
-
-data class DashboardSubject(
-    val subCode: String,
-    val subName: String,
-    val lecType: String,
-    val present: Int,
-    val total: Int,
-    val percent: Double,
-    val tone: AttendanceTone,
-)
 
 data class TodaySlotDisplay(
     val slot: TimetableSlot,
@@ -75,7 +64,7 @@ data class DashboardUiState(
     val threshold: Int = 75,
     val atRiskCount: Int = 0,
     val totalBunkable: Int = 0,
-    val subjects: ImmutableList<DashboardSubject> = persistentListOf(),
+    val subjectCount: Int = 0,
     val todaySlots: ImmutableList<TodaySlotDisplay> = persistentListOf(),
     val nextClass: NextClassInfo? = null,
     val hasAttendance: Boolean = false,
@@ -122,31 +111,7 @@ class DashboardViewModel
                 }
             }
             viewModelScope.launch {
-                var observedKey: AttendanceKey? = null
-                val summary =
-                    coordinator.selectedSemester.flatMapLatest { selection ->
-                        val context = coordinator.activeContext.value
-                        val option = selection.option
-                        val current = if (selection.context == context) selection else AcademicSemesterSelection(context)
-                        val key =
-                            if (context != null && option != null && selection.context == context) {
-                                AttendanceKey(context, option.classId, option.yearId)
-                            } else {
-                                null
-                            }
-                        flow {
-                            if (key != observedKey) {
-                                observedKey = key
-                                manualAttendanceError.value = null
-                                emit(current to AcademicSnapshot<AttendanceResponse>())
-                            }
-                            if (key == null) {
-                                emit(current to AcademicSnapshot<AttendanceResponse>())
-                            } else {
-                                attendanceRepo.observeSummary(key).collect { emit(current to it) }
-                            }
-                        }
-                    }
+                val summary = coordinator.observeAttendance(attendanceRepo) { manualAttendanceError.value = null }
                 combine(
                     summary,
                     preferencesStore.getUserInt("attendance_threshold", 75),
@@ -215,49 +180,18 @@ class DashboardViewModel
             val manualError = presentation.manualError
             val error = selection.error ?: snapshot.error ?: demandError ?: manualError
             val data = snapshot.data
-            if (data == null) {
-                _state.update {
-                    it.copy(
-                        hasAttendance = false,
-                        overallPercent = 0.0,
-                        overallPresent = 0,
-                        overallTotal = 0,
-                        overallTone = AttendanceTone.OK,
-                        atRiskCount = 0,
-                        totalBunkable = 0,
-                        subjects = persistentListOf(),
-                        attendanceError = error?.let(ErrorText::forData),
-                        semesterError = selection.error?.let(ErrorText::forData),
-                        threshold = threshold,
-                        attendanceRefreshing = snapshot.refreshing,
-                    )
-                }
-                return
-            }
-            val raw = data.table.values.map { it.toSubjectAttendance() }
-            val subjects =
-                raw.map { subject ->
-                    DashboardSubject(
-                        subject.subCode,
-                        subject.subName,
-                        subject.lecType,
-                        subject.present,
-                        subject.total,
-                        subject.percent,
-                        attendanceUseCase.tone(subject.percent, threshold),
-                    )
-                }
+            val raw = data?.table?.values.orEmpty().map { it.toSubjectAttendance() }
             _state.update {
                 it.copy(
-                    hasAttendance = true,
-                    overallPercent = data.endrow.percentage,
-                    overallPresent = data.endrow.present,
-                    overallTotal = data.endrow.total,
-                    overallTone = attendanceUseCase.tone(data.endrow.percentage, threshold),
+                    hasAttendance = data != null,
+                    overallPercent = data?.endrow?.percentage ?: 0.0,
+                    overallPresent = data?.endrow?.present ?: 0,
+                    overallTotal = data?.endrow?.total ?: 0,
+                    overallTone = data?.let { attendanceUseCase.tone(it.endrow.percentage, threshold) } ?: AttendanceTone.OK,
                     threshold = threshold,
                     atRiskCount = attendanceUseCase.atRiskCount(raw, threshold),
                     totalBunkable = attendanceUseCase.totalBunkable(raw, threshold),
-                    subjects = subjects.toImmutableList(),
+                    subjectCount = raw.size,
                     attendanceError = error?.let(ErrorText::forData),
                     semesterError = selection.error?.let(ErrorText::forData),
                     attendanceRefreshing = snapshot.refreshing,
@@ -272,21 +206,9 @@ class DashboardViewModel
         ) {
             val error = snapshot?.error ?: demandError ?: manualError
             val data = snapshot?.data
-            if (data == null) {
-                _state.update {
-                    it.copy(
-                        hasTimetable = false,
-                        todaySlots = persistentListOf(),
-                        nextClass = null,
-                        timetableError = error?.let(ErrorText::forData),
-                        timetableRefreshing = snapshot?.refreshing == true,
-                    )
-                }
-                return
-            }
             val today = LocalDate.now().dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ENGLISH)
             val slots =
-                timetableUseCase.sortSlotsByTime(data.weekly[today].orEmpty()).map { slot ->
+                timetableUseCase.sortSlotsByTime(data?.weekly?.get(today).orEmpty()).map { slot ->
                     TodaySlotDisplay(
                         slot,
                         timetableUseCase.displaySubjectName(slot),
@@ -302,11 +224,11 @@ class DashboardViewModel
                 }
             _state.update {
                 it.copy(
-                    hasTimetable = true,
+                    hasTimetable = data != null,
                     todaySlots = slots.toImmutableList(),
                     nextClass = next,
                     timetableError = error?.let(ErrorText::forData),
-                    timetableRefreshing = snapshot.refreshing,
+                    timetableRefreshing = snapshot?.refreshing == true,
                 )
             }
         }

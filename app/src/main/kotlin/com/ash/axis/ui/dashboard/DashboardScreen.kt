@@ -14,7 +14,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.ash.axis.domain.usecase.AttendanceTone
 import com.ash.axis.ui.BottomSpacer
 import com.ash.core.ui.components.AppSectionLabel
 import com.ash.core.ui.components.LoadingStateContainer
@@ -66,7 +65,7 @@ fun DashboardScreen(
                 data.nextClass?.let { next ->
                     item(contentType = "next_class") { NextClassCard(next) }
                 }
-                if (data.subjects.isNotEmpty()) {
+                if (data.subjectCount > 0) {
                     item(contentType = "stats_row") { StatsRow(data) }
                 } else if (!data.hasAttendance && data.attendanceError == null) {
                     item(contentType = "attendance_loading") { Text("Loading attendance…") }
@@ -88,14 +87,6 @@ fun DashboardScreen(
                     item(contentType = "empty_day") { NoClassesToday() }
                 } else if (data.timetableError == null) {
                     item(contentType = "schedule_loading") { Text("Loading schedule…") }
-                }
-
-                val atRiskSubjects = data.subjects.filter { it.tone != AttendanceTone.OK }
-                if (atRiskSubjects.isNotEmpty()) {
-                    item(contentType = "section_label") {
-                        AppSectionLabel("AT RISK · ${atRiskSubjects.size}")
-                    }
-                    item(contentType = "subject_list") { SubjectSummaryList(atRiskSubjects) }
                 }
 
                 item(contentType = "footer") { BottomSpacer() }

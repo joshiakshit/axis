@@ -15,20 +15,7 @@ object SubjectColors {
             Color(0xFFEC4899),
         )
 
-    private val containerPalette =
-        listOf(
-            Color(0xFFD3E3FD),
-            Color(0xFFEDE9FE),
-            Color(0xFFFEF3C7),
-            Color(0xFFFEE2E2),
-            Color(0xFFD1FAE5),
-            Color(0xFFCCFBF1),
-            Color(0xFFFCE7F3),
-        )
-
     fun accent(subjectCode: String): Color = palette[abs(subjectCode.hashCode()) % palette.size]
-
-    fun container(subjectCode: String): Color = containerPalette[abs(subjectCode.hashCode()) % containerPalette.size]
 }
 
 object StatusColors {

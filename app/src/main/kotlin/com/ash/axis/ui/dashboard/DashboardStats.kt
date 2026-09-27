@@ -40,7 +40,7 @@ internal fun StatsRow(data: DashboardUiState) {
         StatCard(
             label = "AT RISK",
             value = data.atRiskCount.toString(),
-            subtitle = "/${data.subjects.size} subjects",
+            subtitle = "/${data.subjectCount} subjects",
             tone = if (data.atRiskCount > 0) AttendanceTone.BAD else AttendanceTone.OK,
             modifier = Modifier.weight(1f),
         )

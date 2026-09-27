@@ -83,7 +83,6 @@ private val AppTypography =
 @Composable
 fun AppTheme(
     themeState: ThemeState = ThemeState(),
-    dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val isDark =
@@ -93,7 +92,7 @@ fun AppTheme(
             ThemeMode.SYSTEM -> isSystemInDarkTheme()
         }
 
-    val useDynamicColor = dynamicColor || themeState.profileName == ColorProfiles.DYNAMIC_NAME
+    val useDynamicColor = themeState.profileName == ColorProfiles.DYNAMIC_NAME
     val colorScheme =
         when {
             useDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
