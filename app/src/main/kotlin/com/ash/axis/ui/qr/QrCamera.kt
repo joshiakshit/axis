@@ -74,10 +74,8 @@ internal fun FrontCameraPreview(
 internal fun QrCameraPreview(
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
     digitalZoom: Float,
-    opticalZoom: Float,
     onQrScanned: (String, String) -> Unit,
     onError: (String) -> Unit,
-    diagnostics: QrDiagnostics,
     onCameraBound: (androidx.camera.core.Camera) -> Unit = {},
     onPinchZoom: (Float) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -85,9 +83,7 @@ internal fun QrCameraPreview(
     val context = LocalContext.current
     val analyzerExecutor = remember { Executors.newSingleThreadExecutor() }
     val cropZoomRef = remember { AtomicReference(1f) }
-    val opticalZoomRef = remember { AtomicReference(1f) }
     cropZoomRef.set(digitalZoom)
-    opticalZoomRef.set(opticalZoom)
     DisposableEffect(Unit) {
         onDispose {
             unbindCamera(context)
@@ -114,11 +110,9 @@ internal fun QrCameraPreview(
                         previewView = this,
                         analyzerExecutor = analyzerExecutor,
                         zoomProvider = { cropZoomRef.get() },
-                        opticalZoomProvider = { opticalZoomRef.get() },
                         onQrScanned = onQrScanned,
                         onError = onError,
                         onCameraBound = onCameraBound,
-                        diagnostics = diagnostics,
                     )
                     val scaleDetector =
                         android.view.ScaleGestureDetector(
@@ -193,11 +187,9 @@ private fun bindQrCamera(
     previewView: PreviewView,
     analyzerExecutor: ExecutorService,
     zoomProvider: () -> Float,
-    opticalZoomProvider: () -> Float,
     onQrScanned: (String, String) -> Unit,
     onError: (String) -> Unit,
     onCameraBound: (androidx.camera.core.Camera) -> Unit = {},
-    diagnostics: QrDiagnostics,
 ) {
     val cameraProviderFuture = ProcessCameraProvider.getInstance(previewView.context)
     val didScan = AtomicBoolean(false)
@@ -226,13 +218,12 @@ private fun bindQrCamera(
                         .build()
                 val reader = createQrReader()
                 analysis.setAnalyzer(analyzerExecutor) { image ->
-                    analyzeQrFrame(image, reader, didScan, zoomProvider(), opticalZoomProvider(), diagnostics) { value, decoder ->
+                    analyzeQrFrame(image, reader, didScan, zoomProvider()) { value, decoder ->
                         previewView.post { onQrScanned(value, decoder) }
                     }
                 }
                 cameraProvider.unbindAll()
                 val camera = cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, analysis)
-                diagnostics.stage(QrStage.CAMERA_BIND)
                 onCameraBound(camera)
             }.onFailure {
                 onError("QR camera unavailable. Try again after closing other camera screens.")
@@ -266,8 +257,6 @@ private fun analyzeQrFrame(
     reader: MultiFormatReader,
     didScan: AtomicBoolean,
     digitalZoom: Float,
-    opticalZoom: Float,
-    diagnostics: QrDiagnostics,
     onQrScanned: (String, String) -> Unit,
 ) {
     if (didScan.get()) {
@@ -275,18 +264,10 @@ private fun analyzeQrFrame(
         return
     }
 
-    diagnostics.frame(image.width, image.height, image.imageInfo.rotationDegrees, opticalZoom, digitalZoom)
-    val startedAt = System.nanoTime()
-
-    fun elapsedMs(): Long = (System.nanoTime() - startedAt) / 1_000_000
-
     fun decodeWithZxing() {
         val decoded = decodeQrImageZxing(image, reader, digitalZoom)
         if (decoded != null && didScan.compareAndSet(false, true)) {
-            diagnostics.recognized(decoded.second, elapsedMs())
             onQrScanned(decoded.first, decoded.second)
-        } else if (decoded == null) {
-            diagnostics.decodeMiss("zxing", elapsedMs())
         }
     }
 
@@ -297,15 +278,12 @@ private fun analyzeQrFrame(
             .addOnSuccessListener { barcodes ->
                 val value = barcodes.firstOrNull { !it.rawValue.isNullOrBlank() }?.rawValue
                 if (value != null && didScan.compareAndSet(false, true)) {
-                    diagnostics.recognized("mlkit", elapsedMs())
                     onQrScanned(value, "mlkit")
                 } else if (value == null) {
-                    diagnostics.decodeMiss("mlkit", elapsedMs())
                     decodeWithZxing()
                 }
             }
             .addOnFailureListener {
-                diagnostics.decodeMiss("mlkit_error", elapsedMs())
                 decodeWithZxing()
             }
             .addOnCompleteListener { image.close() }

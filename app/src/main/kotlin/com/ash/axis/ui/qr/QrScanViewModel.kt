@@ -1,8 +1,8 @@
 package com.ash.axis.ui.qr
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.ash.axis.BuildConfig
 import com.ash.axis.data.academic.AcademicDataCoordinator
 import com.ash.axis.data.repository.AttendanceRepository
 import com.ash.axis.data.repository.AuthRepository
@@ -38,7 +38,6 @@ class QrScanViewModel
     ) : ViewModel() {
         private val _state = MutableStateFlow(QrScanUiState())
         val state: StateFlow<QrScanUiState> = _state.asStateFlow()
-        internal val diagnostics = QrDiagnostics(BuildConfig.DEBUG)
 
         fun clearMessage() {
             _state.update { it.copy(message = null, success = null) }
@@ -63,9 +62,7 @@ class QrScanViewModel
 
             viewModelScope.launch {
                 _state.update { it.copy(isSubmitting = true, message = null, success = null) }
-                val startedAt = System.nanoTime()
                 try {
-                    diagnostics.stage(QrStage.AUTHENTICATION)
                     val user = authRepository.getUserInfo() ?: error("Not logged in")
                     val origin = StudentRequestContext(user.admno, user.brId, user.clientId, user.academicYear)
                     val result =
@@ -78,11 +75,9 @@ class QrScanViewModel
                             longitude = FIXED_LONGITUDE,
                             userSelfie = userSelfie,
                             clientId = user.clientId,
-                            onSubmissionStart = { diagnostics.stage(QrStage.SUBMISSION) },
                         )
-                    diagnostics.response(result.httpStatus, result.httpDurationMs ?: 0, result.success)
                     usageReporter.log(if (result.success == true) UsageReporter.QR_SCAN else UsageReporter.QR_FAIL)
-                    val message = if (result.success == true) refreshMessage(origin, result.message) else result.message
+                    val message = if (result.success) refreshMessage(origin) else result.message
                     if (!isCurrentOrigin(origin)) return@launch
                     _state.update {
                         it.copy(
@@ -95,7 +90,7 @@ class QrScanViewModel
                     throw e
                 } catch (e: Exception) {
                     val status = (e as? IcloudServerException)?.statusCode ?: (e as? HttpException)?.code()
-                    diagnostics.error(e, status, (System.nanoTime() - startedAt) / 1_000_000)
+                    Log.w("AxisQr", "Submission failed: ${e.javaClass.simpleName}, status=${status ?: "none"}")
                     usageReporter.log(UsageReporter.QR_FAIL)
                     _state.update {
                         it.copy(
@@ -118,17 +113,15 @@ class QrScanViewModel
             right: StudentRequestContext,
         ) = left.admno == right.admno && left.brId == right.brId && left.clientId == right.clientId
 
-        private suspend fun refreshMessage(
-            origin: StudentRequestContext,
-            message: String,
-        ): String =
+        private suspend fun refreshMessage(origin: StudentRequestContext): String =
             try {
                 academic.qrSucceeded(origin)
-                message
+                "Your attendance was marked successfully."
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                "$message Attendance refresh failed: ${ErrorText.forData(error)}"
+                Log.w("AxisQr", "Attendance refresh failed after QR success", error)
+                "Attendance was marked, but the latest attendance could not refresh. Pull down to retry."
             }
 
         private fun isCurrentOrigin(origin: StudentRequestContext): Boolean {

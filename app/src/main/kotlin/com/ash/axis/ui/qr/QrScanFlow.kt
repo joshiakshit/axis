@@ -32,7 +32,6 @@ internal fun QrScanFlow(
     onShowMessage: (String) -> Unit,
     onClearMessage: () -> Unit,
     onDismiss: () -> Unit,
-    diagnostics: QrDiagnostics,
 ) {
     var showSelfie by remember { mutableStateOf(false) }
     var showScanner by remember { mutableStateOf(false) }
@@ -55,10 +54,6 @@ internal fun QrScanFlow(
         if (success == true) {
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         }
-    }
-
-    LaunchedEffect(message) {
-        if (message != null) diagnostics.stage(QrStage.RESULT)
     }
 
     fun closeFlow() {
@@ -91,7 +86,6 @@ internal fun QrScanFlow(
     }
 
     fun openScanner() {
-        diagnostics.stage(QrStage.CAMERA_RELEASE)
         showSelfie = false
         showScanner = false
         if (hasPermission(context, Manifest.permission.CAMERA)) pendingScanner = true else requestCamera(CameraAction.Qr)
@@ -100,8 +94,6 @@ internal fun QrScanFlow(
     LaunchedEffect(visible) {
         if (visible) {
             scanMode = QrScanMode.ATTENDANCE
-            diagnostics.start(scanMode)
-            diagnostics.stage(QrStage.SELFIE)
             qrSelfie = null
             showScanner = false
             if (hasPermission(context, Manifest.permission.CAMERA)) showSelfie = true else requestCamera(CameraAction.Selfie)
@@ -137,7 +129,6 @@ internal fun QrScanFlow(
                 if (BuildConfig.DEBUG) {
                     {
                         scanMode = QrScanMode.RECOGNITION_ONLY
-                        diagnostics.start(scanMode)
                         openScanner()
                     }
                 } else {
@@ -145,12 +136,11 @@ internal fun QrScanFlow(
                 },
             onCancel = { closeFlow() },
             onError = onShowMessage,
-            diagnostics = diagnostics,
         )
     }
 
     if (pendingScanner) {
-        CameraHandoffScreen(diagnostics)
+        CameraHandoffScreen()
     }
 
     if (showScanner) {
@@ -173,15 +163,12 @@ internal fun QrScanFlow(
             },
             onCancel = { closeFlow() },
             onError = onShowMessage,
-            diagnostics = diagnostics,
         )
     }
 
-    if (message != null && success == true) {
-        QrSuccessOverlay(onDismiss = onClearMessage)
-    } else if (message != null) {
+    if (message != null) {
         QrResultDialog(
-            success = false,
+            success = success == true,
             message = message,
             onDismiss = onClearMessage,
         )

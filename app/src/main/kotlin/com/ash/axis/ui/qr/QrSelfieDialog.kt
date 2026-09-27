@@ -48,7 +48,6 @@ internal fun SelfieCaptureScreen(
     onRecognitionOnly: (() -> Unit)?,
     onCancel: () -> Unit,
     onError: (String) -> Unit,
-    diagnostics: QrDiagnostics,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -73,8 +72,6 @@ internal fun SelfieCaptureScreen(
                 step = "Step 1 of 2 · Selfie",
                 onClose = onCancel,
             )
-
-            QrDiagnosticOverlay(diagnostics, Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 100.dp))
 
             Column(
                 modifier =
@@ -160,11 +157,10 @@ internal fun BoxScope.CameraTopBar(
 }
 
 @Composable
-internal fun CameraHandoffScreen(diagnostics: QrDiagnostics) {
+internal fun CameraHandoffScreen() {
     Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(color = Color.White.copy(alpha = 0.9f), strokeWidth = 2.dp)
-            QrDiagnosticOverlay(diagnostics, Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 100.dp))
         }
     }
 }

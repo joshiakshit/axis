@@ -32,7 +32,7 @@ internal class QrScanResultParser(
                 else -> defaultSuccess && !message.contains("fail", ignoreCase = true) && !message.contains("error", ignoreCase = true)
             }
 
-        return QrScanResult(success = success, message = message, rawResponse = body)
+        return QrScanResult(success = success, message = message)
     }
 
     private fun JsonElement.primitiveTextOrNull(): String? =
