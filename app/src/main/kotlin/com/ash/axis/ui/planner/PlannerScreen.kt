@@ -1,17 +1,22 @@
 package com.ash.axis.ui.planner
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -24,7 +29,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ash.axis.ui.BottomSpacer
@@ -61,7 +69,7 @@ fun PlannerScreen(
             item {
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("Planner", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { showCalendar = true }) { Text("Academic calendar") }
+                    TextButton(onClick = { showCalendar = true }) { Text("No-class days") }
                 }
             }
             if (data.isOffline) item { OfflineBanner(visible = true) }
@@ -77,16 +85,16 @@ fun PlannerScreen(
             item {
                 AppCard {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Forecast until", style = MaterialTheme.typography.labelLarge)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Forecast until", style = MaterialTheme.typography.labelLarge)
+                            PlannerInfoButton(
+                                "Forecast uses your weekly timetable and assumes you attend except on planned absences and no-class days.",
+                                "About forecast end",
+                            )
+                        }
                         TextButton(onClick = { showEndPicker = true }) {
                             Text(data.forecastEnd?.format(forecastDateFormat) ?: "Choose a date")
                         }
-                        Text(
-                            "Estimate based on your weekly timetable. Assumes you attend except on " +
-                                "planned absences and saved no-class dates.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                     }
                 }
             }
@@ -95,7 +103,13 @@ fun PlannerScreen(
             }
             item {
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Planned absences", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                    Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Planned absences", style = MaterialTheme.typography.titleSmall)
+                        PlannerInfoButton(
+                            "Add future days you plan to miss. Only dates through the forecast end affect the estimate.",
+                            "About planned absences",
+                        )
+                    }
                     if (data.absences.isNotEmpty()) TextButton(onClick = viewModel::clearAbsences) { Text("Clear") }
                     TextButton(onClick = { showAbsencePicker = true }, enabled = data.forecastEnd?.isAfter(LocalDate.now()) == true) {
                         Text("Add")
@@ -131,11 +145,6 @@ fun PlannerScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Text(
-                    "Only dates through the forecast end count. Schedule changes can affect the result.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
             item { BottomSpacer() }
         }
@@ -165,7 +174,7 @@ fun PlannerScreen(
     if (showCalendar) {
         ModalBottomSheet(onDismissRequest = { showCalendar = false }) {
             Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
-                PlannerMarkersSection(data.markers, viewModel::addMarker, viewModel::deleteMarker)
+                PlannerMarkersSection(data.markers, viewModel::addNoClassDays, viewModel::deleteMarker)
             }
         }
     }
@@ -175,3 +184,19 @@ private fun sourceTime(millis: Long?): String =
     millis?.let {
         DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(it))
     } ?: "Not available"
+
+@Composable
+internal fun PlannerInfoButton(
+    description: String,
+    label: String,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }, modifier = Modifier.size(32.dp).semantics { contentDescription = label }) {
+            Text("ⓘ", fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            Text(description, modifier = Modifier.widthIn(max = 260.dp).padding(12.dp), style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}

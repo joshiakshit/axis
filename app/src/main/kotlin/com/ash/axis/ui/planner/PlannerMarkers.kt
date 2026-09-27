@@ -10,12 +10,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
-import androidx.compose.material3.TabRowDefaults
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -25,14 +20,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ash.axis.domain.model.StudentMarker
-import com.ash.axis.domain.model.StudentMarkerType
 import com.ash.core.ui.components.AxisCalendar
 import com.ash.core.ui.components.AxisDialog
 import com.ash.core.ui.components.DateRangeSelection
@@ -47,7 +38,7 @@ import java.util.Locale
 @Composable
 internal fun PlannerMarkersSection(
     markers: List<StudentMarker>,
-    onAdd: (String, StudentMarkerType, LocalDate, LocalDate) -> Unit,
+    onAdd: (LocalDate, LocalDate) -> Unit,
     onDelete: (Long) -> Unit,
 ) {
     var showEditor by remember { mutableStateOf(false) }
@@ -68,8 +59,8 @@ internal fun PlannerMarkersSection(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("EXAMS & HOLIDAYS", fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp)
-                TextButton(onClick = { showEditor = true }) { Text("Add") }
+                Text("NO-CLASS DAYS", fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp)
+                TextButton(onClick = { showEditor = true }) { Text("Mark days") }
             }
             MarkerListBody(markers, preview, onDelete)
             if (preview.hiddenCount > 0 || expanded) {
@@ -80,9 +71,9 @@ internal fun PlannerMarkersSection(
         }
     }
     if (showEditor) {
-        StudentMarkerDialog(
-            onAdd = { title, type, startDate, endDate ->
-                onAdd(title, type, startDate, endDate)
+        NoClassDaysDialog(
+            onAdd = { startDate, endDate ->
+                onAdd(startDate, endDate)
                 showEditor = false
             },
             onDismiss = { showEditor = false },
@@ -99,7 +90,7 @@ private fun MarkerListBody(
     when {
         markers.isEmpty() ->
             Text(
-                "Add exam and holiday dates you already know.",
+                "Mark days without classes to exclude them from the forecast.",
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -121,32 +112,17 @@ private fun StudentMarkerRow(
     marker: StudentMarker,
     onDelete: (Long) -> Unit,
 ) {
-    val formatter = remember { DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH) }
-    val dateLabel =
-        remember(marker.startDate, marker.endDate) {
-            if (marker.startDate == marker.endDate) {
-                marker.startDate.format(formatter)
-            } else {
-                "${marker.startDate.format(formatter)} – ${marker.endDate.format(formatter)}"
-            }
-        }
+    val dateLabel = remember(marker.startDate, marker.endDate) { noClassDateLabel(marker) }
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(marker.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(
-                "$dateLabel · ${marker.type.label}",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        Text(dateLabel, modifier = Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         IconButton(onClick = { onDelete(marker.id) }) {
             Icon(
                 Icons.Default.Delete,
-                contentDescription = "Remove ${marker.title}",
+                contentDescription = "Remove no-class days $dateLabel",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -154,20 +130,11 @@ private fun StudentMarkerRow(
 }
 
 @Composable
-private fun StudentMarkerDialog(
-    onAdd: (String, StudentMarkerType, LocalDate, LocalDate) -> Unit,
+private fun NoClassDaysDialog(
+    onAdd: (LocalDate, LocalDate) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var type by remember { mutableStateOf(StudentMarkerType.EXAM) }
-    var examTitle by remember { mutableStateOf("") }
-    var holidayTitle by remember { mutableStateOf("") }
-    // Keep each tab's selected dates when switching tabs.
-    var examDates by remember { mutableStateOf(DateRangeSelection()) }
-    var holidayDates by remember { mutableStateOf(DateRangeSelection()) }
-
-    val isExam = type == StudentMarkerType.EXAM
-    val title = if (isExam) examTitle else holidayTitle
-    val selection = if (isExam) examDates else holidayDates
+    var selection by remember { mutableStateOf(DateRangeSelection()) }
     val startDate = selection.start
     val endDate = selection.end ?: startDate
 
@@ -176,87 +143,33 @@ private fun StudentMarkerDialog(
         footer = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
             TextButton(
-                enabled = title.isNotBlank() && startDate != null && endDate != null,
-                onClick = { onAdd(title, type, startDate!!, endDate!!) },
+                enabled = startDate != null,
+                onClick = { startDate?.let { onAdd(it, endDate ?: it) } },
             ) {
                 Text("Save")
             }
         },
     ) {
-        MarkerTypeTabs(selected = type, onSelect = { type = it })
-        OutlinedTextField(
-            value = title,
-            onValueChange = { if (isExam) examTitle = it else holidayTitle = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text(if (isExam) "Exam name" else "Holiday name") },
-            singleLine = true,
-        )
+        Text("Mark no-class days", style = MaterialTheme.typography.titleMedium)
+        Text("Pick one date, or two dates for a range.", style = MaterialTheme.typography.bodySmall)
         AxisCalendar(
             selection = selection,
-            onDateClick = { date ->
-                if (isExam) examDates = examDates.toggle(date) else holidayDates = holidayDates.toggle(date)
-            },
+            onDateClick = { selection = selection.toggle(it) },
         )
         Text(
             markerDateSummary(startDate, endDate),
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(
-            "Marked days count as no-class days in your attendance forecast.",
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 
-@Composable
-private fun MarkerTypeTabs(
-    selected: StudentMarkerType,
-    onSelect: (StudentMarkerType) -> Unit,
-) {
-    val types = StudentMarkerType.entries
-    TabRow(
-        selectedTabIndex = types.indexOf(selected),
-        containerColor = Color.Transparent,
-        contentColor = MaterialTheme.colorScheme.primary,
-        indicator = { tabPositions ->
-            if (selected.ordinal < tabPositions.size) {
-                val pos = tabPositions[selected.ordinal]
-                val inset = (pos.right - pos.left - 32.dp) / 2
-                TabRowDefaults.SecondaryIndicator(
-                    modifier =
-                        Modifier
-                            .tabIndicatorOffset(pos)
-                            .padding(horizontal = inset.coerceAtLeast(0.dp)),
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-        },
-        divider = {},
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        types.forEach { option ->
-            val isSelected = option == selected
-            Tab(
-                modifier = Modifier.clip(AppShapes.medium),
-                selected = isSelected,
-                onClick = { onSelect(option) },
-                text = {
-                    Text(
-                        if (option == StudentMarkerType.EXAM) "Exams" else "Holidays",
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                        color =
-                            if (isSelected) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        maxLines = 1,
-                    )
-                },
-            )
-        }
+internal fun noClassDateLabel(marker: StudentMarker): String {
+    val formatter = DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH)
+    return if (marker.startDate == marker.endDate) {
+        marker.startDate.format(formatter)
+    } else {
+        "${marker.startDate.format(formatter)} – ${marker.endDate.format(formatter)}"
     }
 }
 

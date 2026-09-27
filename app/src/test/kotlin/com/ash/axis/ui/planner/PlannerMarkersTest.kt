@@ -42,6 +42,17 @@ class PlannerMarkersTest {
         assertEquals(0, preview.hiddenCount)
     }
 
+    @Test
+    fun `saved exam and holiday entries show only their no-class dates`() {
+        val start = LocalDate.of(2026, 10, 15)
+        val end = start.plusDays(2)
+        val exam = StudentMarker(1, "Midterm", StudentMarkerType.EXAM, start, end)
+        val holiday = StudentMarker(2, "Break", StudentMarkerType.HOLIDAY, start, end)
+
+        assertEquals("Oct 15 – Oct 17", noClassDateLabel(exam))
+        assertEquals(noClassDateLabel(exam), noClassDateLabel(holiday))
+    }
+
     private fun marker(
         id: Long,
         startDate: LocalDate,
