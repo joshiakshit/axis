@@ -1,16 +1,9 @@
-# Axis project memory
+# Axis API notes
 
-Last updated: 2026-09-12
+These notes record the authentication and timetable repair from 2026-09-12.
+Use the current source and tests to verify implementation details.
 
-## Product intent
-
-Axis is an easier interface for student data. It is not an exact copy of iCloudEMS. Match the official client only where the server contract requires it.
-
-## Current priority
-
-The authentication and timetable repair for iCloudEMS 3.0.9 shipped in Axis 1.1.1, version code 9. QR and broad freshness work are deferred.
-
-## Stable research findings
+## API findings from September 2026
 
 - The official app version is 3.0.9 with version code 242.
 - OTP login and validation send `appversion: 3.0.9`.
@@ -28,7 +21,7 @@ The authentication and timetable repair for iCloudEMS 3.0.9 shipped in Axis 1.1.
 - Empty day arrays are valid schedule data.
 - The small feature response is not schedule data.
 
-## Current implementation decisions
+## Authentication and timetable repair decisions
 
 - Keep the current Axis device UUID behavior.
 - Keep the existing remote authorization-token mechanism.
@@ -42,47 +35,17 @@ The authentication and timetable repair for iCloudEMS 3.0.9 shipped in Axis 1.1.
 - Use v3 timetable keys with student, branch, client, year, route, and date range.
 - Do not retry legacy after a confirmed V1 selection.
 
-## Deferred decisions
+## Checks still recorded as open
 
-- QR scanner repair and QR template flow.
-- Device registration and binding.
-- Biometric, geofence, live location, and selfie rules.
-- Attendance cache policy.
-- Timetable cache duration.
-- Manual-refresh error presentation.
+- The integration reports did not verify device layout, accessibility, PNG sharing, QR camera behavior, or performance on a device.
+- A real classroom QR submission still needs confirmation in the historical handoff.
+- The integration reports flag backend identity-token signature verification for a separate security review.
+- The old handoff did not confirm deployment of the backend migration. Check deployment state before applying migrations.
+- The old handoff left update installation after returning from Android permission settings unverified.
 
-## Work state
+These are historical gaps, not a fresh assessment of release 1.2.2.
 
-The source implementation and unit tests pass local Android and backend validation. The repair is committed in `efa74c3` and `440b10b`.
+## Historical records
 
-Axis 1.1.1, version code 9, was signed with the configured release keystore and published on 2026-09-12. The deployed latest version is code 9. The existing minimum supported version remains code 8. The verified APK SHA-256 is `f7952178d528595ffabef0cbe17a5659a0e052aa9f36ad3e771bf43b767ab0d2`.
-
-Installed and verified tools:
-
-- JDK 17 at `C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot`;
-- JDK 21 at `C:\Program Files\Java\jdk-21.0.12.1`;
-- Android platform tools at `C:\platform-tools-latest-windows\platform-tools`;
-- Node.js and npm at `C:\Program Files\nodejs`.
-
-The deployed tenant config was updated and confirmed with `appVersion: 3.0.9` on 2026-09-11.
-
-Live traffic validation on 2026-09-12 confirmed the OTP version, JWT profile identity, authorization, absence of device registration, exact client ID case, profile academic year, false-feature fallback, legacy schedule payload, displayed-week data, and forced profile refresh.
-
-The tenant did not expose the true selector response. Unit tests cover the strict boolean `true` and string `"1"` selector. A temporary debug-only route override exercised the live V1 schedule endpoint. Two V1 schedule requests returned HTTP 200, and no new legacy request followed. The normal source and APK were restored after the check.
-
-`local.properties` was restored from `C:\Coding\Axis\keystore\keystore\local.properties.backup`. The old Linux SDK and keystore paths were replaced with current Windows paths. All secret values were preserved. Never commit or print this file.
-
-Android Studio created `C:\Users\Evo\AppData\Local\Android\Sdk`. Platform 35 and its `android.jar` are installed. Platform `android-37.0` and build tools 36.0.0 are also present. Android SDK command-line tools are not installed, but they are not required for the current Gradle build.
-
-The project-local Gradle cache at `C:\Coding\Axis\.gradle-user` was recreated for validation.
-
-The research root is organized into only `v3.0.8/` and `v3.0.9/`. Historical inputs and evidence remain. Reproducible tool caches and build intermediates were removed. Apktool and uber-apk-signer remain under `v3.0.9/tools/`.
-
-## References
-
-- Session handoff: `HANDOFF.md`
-- Implementation plan: `docs/plans/auth-timetable-repair.md`
-- Verification plan: `docs/plans/auth-timetable-verification.md`
-- Research summary: `C:\Coding\Axis\research\research\v3.0.9\INITIAL_INTELLIGENCE.md`
-- Hermes review: `C:\Coding\Axis\research\research\v3.0.9\HERMES_REVIEW.md`
-- Research log: `C:\Coding\Axis\research\research\v3.0.9\WORKLOG.md`
+The old handoff, repair plans, and agent reports are available in Git at commit `0268ac1`.
+Use `git show 0268ac1:HANDOFF.md` or `git ls-tree -r --name-only 0268ac1 docs/plans` to inspect them.
